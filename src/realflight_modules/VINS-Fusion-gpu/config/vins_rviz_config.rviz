@@ -274,7 +274,7 @@ Visualization Manager:
           Value: true
         - Class: rviz/Image
           Enabled: true
-          Image Topic: /vins_fusion/image_track
+          Image Topic: /feature_tracker/feature_img
           Max Value: 1
           Median window: 5
           Min Value: 0
