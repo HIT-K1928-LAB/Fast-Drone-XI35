@@ -127,6 +127,7 @@ xhost +local:root # 允许本地 root 显示 X 窗口
 
 docker run -it \
 --name fd_runtime_pc \
+--runtime=nvidia \
 --gpus all \
 --net=host \
 --privileged \
