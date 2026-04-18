@@ -132,6 +132,7 @@ void FeatureTracker::rejectWithF() {
         reduceEigenVector(cur_xdesc, status);
         reduceVector(cur_un_pts, status);
         reduceVector(cur_ids, status);
+        reduceVector(prev_ids, status);
         reduceVector(track_cnt, status);
         ROS_DEBUG(
             "FM ransac: %d -> %lu: %f", size_a, cur_pts.size(), 1.0 * cur_pts.size() / size_a);
@@ -628,10 +629,12 @@ void FeatureTracker::track_img_use_opticalflow(
 
         // update feature predictor
         feature_predictor.update(cur_pts, status);
-        double ori_flow_avg  = getFlowErr(prev_pts, cur_pts, status);
-        double pred_flow_avg = getFlowErr(cur_pred_pts, cur_pts, status);
+
+        // double ori_flow_avg  = getFlowErr(prev_pts, cur_pts, status);
+        // double pred_flow_avg = getFlowErr(cur_pred_pts, cur_pts, status);
         // ROS_INFO("[ori_flow_avg]:[%lf] [pred_flow_avg]:[%lf].", ori_flow_avg,
         //          pred_flow_avg);
+
         // check by desc match
         checkAndExtractCurFlow(prev_pts, prev_xdesc, cur_pts, cur_xdesc, status);
         // retrack
@@ -647,6 +650,7 @@ void FeatureTracker::track_img_use_opticalflow(
         reduceVector(cur_pts, status);
         reduceEigenVector(cur_xdesc, status);
         reduceVector(cur_ids, status);
+        reduceVector(prev_ids, status);
         reduceVector(track_cnt, status);
     }
     for (auto &n : track_cnt) n++;
@@ -766,12 +770,26 @@ void FeatureTracker::track_img_use_opticalflow(
         prev_un_right_pts_map = cur_un_right_pts_map;
     }
     // draw
-    if (feature_tracker_config.show_track)
-        DrawOpticalFlow(
-            cur_img, right_img, cur_ids, cur_pts, cur_right_pts, prevLeftPtsMap, retrack_ids);
+    switch (feature_tracker_config.show_track) {
+        case 1:
+            if (!prev_img.empty() && !cur_img.empty())
+                DrawMatches(prev_img, cur_img, prev_pts, cur_pts, prev_ids, cur_ids);
+            break;
+        case 2:
+            if (!cur_img.empty() && !right_img.empty())
+                DrawMatches(cur_img, right_img, cur_pts, cur_right_pts, cur_ids, right_ids);
+        case 3:
+            if (!prev_img.empty() && !cur_img.empty())
+                DrawOpticalFlow(
+                    cur_img, right_img, cur_ids, cur_pts, cur_right_pts, prevLeftPtsMap,
+                    retrack_ids);
+        default:
+            break;
+    }
     printTrackCnt();
     prev_img        = cur_img;
     prev_pts        = cur_pts;
+    prev_ids        = cur_ids;
     prev_xdesc      = cur_xdesc;
     prev_un_pts     = cur_un_pts;
     prev_un_pts_map = cur_un_pts_map;
@@ -1046,9 +1064,9 @@ void FeatureTracker::DrawMatches(
         if (it != ref_ids_pts.end()) {
             cv::Point2f ref_kpts(it->second.x, it->second.y);
             cv::Point2f kpts(pts[i].x + ref_image.cols, pts[i].y);
-            cv::circle(rgba_image, ref_kpts, 2, cv::Scalar(255, 0, 0), 2);
-            cv::circle(rgba_image, kpts, 2, cv::Scalar(255, 0, 0), 2);
-            // cv::line(rgba_image, ref_kpts, kpts, cv::Scalar(0,255,0, 10), 2);
+            cv::circle(rgba_image, ref_kpts, 2, cv::Scalar(0, 0, 255), 2);
+            cv::circle(rgba_image, kpts, 2, cv::Scalar(0, 0, 255), 2);
+            cv::line(rgba_image, ref_kpts, kpts, cv::Scalar(0, 255, 0, 10), 1);
         }
     }
     cv::cvtColor(rgba_image, imTrack, cv::COLOR_BGRA2BGR);
