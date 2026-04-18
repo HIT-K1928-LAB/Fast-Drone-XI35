@@ -18,6 +18,12 @@ void KfInterface::receiveVinsInvalidTopic(const std_msgs::BoolConstPtr& vins_inv
     health_monitor_.setVinsInvalid(is_vins_invalid_);
 }
 
+void KfInterface::receiveTofTopic(const mavros_msgs::OpticalFlowRadConstPtr& tof_msg) {
+    MeasureBasePtr meas_ptr = TofMeas::createPtr(tof_msg);
+    meas_que_.push(meas_ptr);
+    cv_msg_.notify_all();
+}
+
 void KfInterface::processMeasurements() {
     while (ros::ok() && !ros::isShuttingDown()) {
         std::unique_lock<std::mutex> lock(mtx_msg_);
@@ -37,12 +43,11 @@ void KfInterface::processMeasurements() {
                             auto imu_meas = std::static_pointer_cast<ImuMeas>(meas);
                             kf_coordiantor_.processImuMeas(imu_meas);
                             static_check_.inputImu(imu_meas);
-                            health_monitor_.updateFromImuProp(meas->timestamp_s);
+                            health_monitor_.updateFromImuProp(imu_meas->timestamp_s);
                             if (static_check_.isStatic()) {
                                 kf_coordiantor_.updateWithZUPT(imu_meas);
-                                health_monitor_.updateFromZupt(meas->timestamp_s);
+                                health_monitor_.updateFromZupt(imu_meas->timestamp_s);
                                 ROS_WARN_THROTTLE(1, "Static Checked!");
-                                // ROS_WARN("Static Checked!");
                             }
                             publishStatic(static_check_.isStatic());
                             break;
@@ -57,6 +62,13 @@ void KfInterface::processMeasurements() {
                                 health_monitor_.updateFromVisUpt(odom_meas->timestamp_s);
                             }
                             publishObvOdom(odom_meas);
+                            break;
+                        }
+                        case MeasureType::kOpticalFlowRad: {
+                            if (true) break;
+                            if (static_check_.isStatic()) break;
+                            auto tof_meas = std::static_pointer_cast<TofMeas>(meas);
+                            kf_coordiantor_.updateWithTofMeas(tof_meas);
                             break;
                         }
                         default:
@@ -87,6 +99,7 @@ void KfInterface::init(ros::NodeHandle& nh) {
     sub_odom_     = nh.subscribe(config_.odom_topic, 100, &KfInterface::receiveOdomTopic, this);
     sub_vins_fail_ =
         nh.subscribe(config_.vins_invalid_topic, 100, &KfInterface::receiveVinsInvalidTopic, this);
+    sub_tof_ = nh.subscribe(config_.tof_topic, 100, &KfInterface::receiveTofTopic, this);
 }
 
 void KfInterface::publishImuOdom(double t) {
@@ -111,7 +124,7 @@ void KfInterface::publishImuOdom(double t) {
     odom_msg.twist.twist.linear.z    = state_vel.z();
     odom_msg.twist.twist.angular.x   = bias_accel.x();
     odom_msg.twist.twist.angular.y   = bias_accel.y();
-    odom_msg.twist.twist.angular.z   = health_monitor_.getHealthPercent();
+    odom_msg.twist.twist.angular.z   = bias_accel.z();
     pub_imu_odom_.publish(odom_msg);
 
     geometry_msgs::PoseStamped imu_pose_stamped;
@@ -123,12 +136,11 @@ void KfInterface::publishImuOdom(double t) {
     imu_path_.poses.push_back(imu_pose_stamped);
     pub_imu_path_.publish(imu_path_);
 
-    // Eigen::Vector3d euler_angles = state_oir_q.toRotationMatrix().eulerAngles(2, 1, 0);
-    // euler_angles                 = euler_angles / (2 * M_PI) * 180.0;
-    // ROS_WARN_THROTTLE(0.5,
-    //                   "time: %f, t: %f %f %f , yaw: %f , pitch: %f , roll: %f ",
-    //                   t, state_posi.x(), state_posi.y(), state_posi.z(),
-    //                   euler_angles.x(), euler_angles.y(), euler_angles.z());
+    Eigen::Vector3d euler_angles = state_oir_q.toRotationMatrix().eulerAngles(2, 1, 0);
+    euler_angles                 = euler_angles / (2 * M_PI) * 180.0;
+    ROS_WARN_THROTTLE(
+        0.5, "time: %f, t: %f %f %f , yaw: %f , pitch: %f , roll: %f ", t, state_posi.x(),
+        state_posi.y(), state_posi.z(), euler_angles.x(), euler_angles.y(), euler_angles.z());
 }
 
 void KfInterface::publishObvOdom(const OdomMeasPtr& odom_meas) {

@@ -52,18 +52,26 @@ body_T_cam0: !!opencv-matrix
    rows: 4
    cols: 4
    dt: d
-   data: [ -0.023812, -0.0292592, 1.00098, 0.0398414,
-           -0.999804, -0.00650283, -0.0235935, 0.0041051,
-           -0.00856173, -1.00134, 0.0287238, 0.0254451,
-            0., 0., 0., 1. ]
+#    data: [ -0.023812, -0.0292592, 1.00098, 0.0398414,
+#            -0.999804, -0.00650283, -0.0235935, 0.0041051,
+#            -0.00856173, -1.00134, 0.0287238, 0.0254451,
+#             0., 0., 0., 1. ]
+   data: [ -0.01730203, -0.07695563,  0.99688438, 0.0852784 ,
+           -0.99699669,  0.0766019 , -0.0113906 , 0.00400456,
+           -0.07548667, -0.99408751, -0.07804988, 0.02146165,
+            0.        ,  0.        ,  0.        , 1.         ]
 body_T_cam1: !!opencv-matrix
    rows: 4
    cols: 4
    dt: d
-   data: [  -0.0190521, -0.0297924, 1.00187, 0.0389944,
-            -1.00051, 0.00690096, 0.018821, -0.0440594,
-            -0.00859325, -1.0013, 0.0299389, 0.0251162,
-            0., 0., 0., 1. ]
+#    data: [  -0.0190521, -0.0297924, 1.00187, 0.0389944,
+#             -1.00051, 0.00690096, 0.018821, -0.0440594,
+#             -0.00859325, -1.0013, 0.0299389, 0.0251162,
+#             0., 0., 0., 1. ]
+   data: [ -0.02015335, -0.08147458,  0.99647164,  0.08346832,
+           -0.99699531,  0.07619839, -0.01393373, -0.04530058,
+           -0.07479429, -0.99375837, -0.08276543,  0.01778846,
+            0.        ,  0.        ,  0.        ,  1.         ]
 
 #Multiple thread support
 multiple_thread: 1
@@ -125,7 +133,7 @@ plnet:
     max_keypoints: 300  #200 250 sp或xfeat提取特征点数量上限
     keypoint_threshold: 0.1 #0.004 0.001 for superpoint 0.05 ~ 0.1for xfeat
     remove_borders: 4
-    dist_thresh: 30 #nms dist
+    dist_thresh: 20 #nms dist
     line_threshold: 0.75
     line_length_threshold: 50
     pub_freq: 10
@@ -136,7 +144,7 @@ plnet:
     csv_file_path: "/home/nx05/csv/vins-frontend/xp_opticalflow_retrack.csv" # xp_opticalflow.csv
 
     of_max_cnt: 150 # max feature number in feature tracking for opticalflow 200
-    of_min_dist: 30 # min distance between two features for opticalflow 光流nms半径 20
+    of_min_dist: 20 # min distance between two features for opticalflow 光流nms半径 20
 
     superpoint_onnx_model: "superpoint_v1_sim_int32.onnx"
     superpoint_trt_model: "superpoint_v1_sim_int32.engine"
