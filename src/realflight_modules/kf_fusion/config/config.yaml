@@ -12,7 +12,13 @@ accel_walk_std: 1e-3
 gyro_walk_std: 1e-4
 
 # motion capture
-use_motion_capture: true
+use_motion_capture: false
+
+# tof
+use_tof: true
+tof_deriv_thresh: 5.0
+tof_merge_freq: 5.0
+tof_ground_bias: 0.06
 
 # bias relevant
 enable_merge_vins_bias: true #融合vins零偏

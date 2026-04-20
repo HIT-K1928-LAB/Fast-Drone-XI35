@@ -22,9 +22,11 @@ class KfInterface {
         std::string vins_invalid_topic;
         std::string tof_topic;
         bool use_motion_capture;
+        bool use_tof;
         void loadConfig() {
             imu_topic          = ParamReader::getInstance().getString("imu_topic", "/imu/data");
             use_motion_capture = ParamReader::getInstance().getBool("use_motion_capture", false);
+            use_tof            = ParamReader::getInstance().getBool("use_tof", false);
             vins_invalid_topic = ParamReader::getInstance().getString(
                 "vins_valid_topic", "/vins_invalid_topic/data");
             if (use_motion_capture) {
@@ -32,9 +34,9 @@ class KfInterface {
                     "motion_capture_topic", "/motion_capture/data");
             } else {
                 odom_topic = ParamReader::getInstance().getString("odom_topic", "/odom/data");
-                tof_topic  = ParamReader::getInstance().getString(
-                    "tof_topic", "/mavros/px4flow/raw/optical_flow_rad");
             }
+            tof_topic = ParamReader::getInstance().getString(
+                "tof_topic", "/mavros/px4flow/raw/optical_flow_rad");
         }
     };
     KfInterface() {

@@ -293,6 +293,7 @@ void KfCoordinator::solveAndUpdate() {
     const Eigen::MatrixXd kf_K =
         state_cov_ * kf_H.transpose() * (kf_H * state_cov_ * kf_H.transpose() + obv_R).inverse();
     // std::cout << "kf_K: " << std::endl << kf_K << std::endl;
+
     const Eigen::VectorXd kf_deltaX = kf_K * kf_deltaZ;
     // std::cout << "kf_deltaX: " << std::endl << kf_deltaX << std::endl;
     const Eigen::MatrixXd kf_temp =
@@ -480,7 +481,7 @@ void KfCoordinator::updateWithTofMeas(const TofMeasPtr& tof_meas) {
         Eigen::Vector3d state_p_w_i = state_manager_.getImuTvecState();
         Sophus::SO3d state_so3_w_i  = state_manager_.getImuOriState();
         state_so3_w_i *= Sophus::SO3d(du_info.deltaR.transpose());
-        Sophus::SO3d R_w_i          = state_so3_w_i.matrix();
+        Eigen::Matrix3d R_w_i       = state_so3_w_i.matrix();
         Eigen::Vector3d state_vel_w = state_manager_.getImuVelState();
         state_p_w_i                 = state_p_w_i - state_vel_w * du_info.deltaT +
                       R_w_i * (du_info.deltaV * du_info.deltaT - du_info.deltaP) +
@@ -493,21 +494,23 @@ void KfCoordinator::updateWithTofMeas(const TofMeasPtr& tof_meas) {
         // z4 = -t_i_f1.z();
         double h_pred = state_p_w_i.z();
 
-        Eigen::Matrix<double, 1, 1> residual_h;
-        Eigen::Vector3d t(0, 0, d);
-        Eigen::Vector3d z3 = R_i_f * t + t_i_f;
+        Eigen::Vector3d tof_vec(0, 0, d);
+        Eigen::Vector3d tof_vec_i = R_i_f * tof_vec + t_i_f;
         // Eigen::Vector3d z5 = R_w_i*t;
-        Eigen::Vector3d z1 = R_w_i * z3;
-        double h           = fabs(z1.z());
-        // double  h1=z5.z;
+        Eigen::Vector3d tof_vec_w = R_w_i * tof_vec_i;
+        double h_tof              = fabs(tof_vec_w.z()) - kf_config.tof_ground_bias;
+        if (!judgeTofValid(h_tof, tof_meas->timestamp_s)) {
+            return;
+        }
 
-        residual_h(0, 0) = h - z0 - z2 - h_pred;
-        // residual_h(0,0) = h1 + z4 - z0 - z2 - h_pred;
+        Eigen::Matrix<double, 1, 1> residual_h;
+        residual_h(0, 0) = h_tof - h_pred;
+
         int posi_wi_idx        = state_manager_.state_pool.at(getImuTvecUid()).startIndex();
         int posi_wi_local_size = state_manager_.state_pool.at(getImuTvecUid()).localSize();
 
         Eigen::Matrix<double, 1, 3> d_zh_d_pwi = Eigen::Matrix<double, 1, 3>::Zero();
-        d_zh_d_pwi(0, 2)                       = -1.0;
+        d_zh_d_pwi(0, 2)                       = 1.0;
 
         jacobians.push_back(d_zh_d_pwi);
         id_size_pairs.emplace_back(posi_wi_idx, posi_wi_local_size);
@@ -517,8 +520,36 @@ void KfCoordinator::updateWithTofMeas(const TofMeasPtr& tof_meas) {
         id_size_pairs.clear();
 
         double tof_h_cov = kf_config.obv_tof_h_cov.z();  // 取高度协方差的z轴值
-        Eigen::Matrix<double, 1, 1> obv_R;
-        obv_R(0, 0) = tof_h_cov * tof_h_cov;
+        obv_R            = Eigen::Matrix<double, 1, 1>::Identity();
+        obv_R(0, 0)      = tof_h_cov * tof_h_cov;
         solveAndUpdate();
     }
+}
+
+bool KfCoordinator::judgeTofValid(double cur_ground_h, double cur_tof_time) {
+    static double last_merge_time = -1;
+    static double last_ground_h   = -1;
+    static double first_tof_time  = -1;
+    if (last_merge_time == -1 || last_ground_h == -1) {
+        last_merge_time = cur_tof_time;
+        last_ground_h   = cur_ground_h;
+        first_tof_time  = cur_tof_time;
+        return false;
+    }
+    static int merge_tof_counts = 1;
+    double merge_tof_freq       = round(1.0 * merge_tof_counts / (cur_tof_time - first_tof_time));
+    if (merge_tof_freq <= kf_config.tof_merge_freq) {
+        if (abs(merge_tof_freq - kf_config.tof_merge_freq) < 0.01 * kf_config.tof_merge_freq) {
+            merge_tof_counts = 0;
+            first_tof_time   = cur_tof_time;
+        }
+        double h_deriv = (cur_ground_h - last_ground_h) / (cur_tof_time - last_merge_time);
+        if (h_deriv < kf_config.tof_deriv_thresh) {
+            last_merge_time = cur_tof_time;
+            last_ground_h   = cur_ground_h;
+            merge_tof_counts++;
+            return true;
+        }
+    }
+    return false;
 }

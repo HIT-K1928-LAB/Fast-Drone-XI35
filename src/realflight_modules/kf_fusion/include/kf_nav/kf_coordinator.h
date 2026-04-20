@@ -5,6 +5,7 @@
 #include "kf_nav/parameter.hpp"
 #include "kf_nav/state_initializer.h"
 #include "kf_nav/state_manager.h"
+#include <optional>
 
 using DUMatType = Eigen::Matrix<double, total_local_size, total_local_size>;
 
@@ -45,6 +46,10 @@ class KfCoordinator {
         bool estimate_ext_tvec      = true;
         bool enable_merge_vins_bias = false;
 
+        double tof_deriv_thresh = 5.0;
+        double tof_merge_freq   = 2.0;
+        double tof_ground_bias  = 0.05;
+
         double imu_que_dura_length_{1.0};
 
         Eigen::Vector3d obv_odom_rot_cov;
@@ -82,6 +87,10 @@ class KfCoordinator {
             estimate_ext_tvec  = ParamReader::getInstance().getBool("estimate_ext_tvec", true);
             enable_merge_vins_bias =
                 ParamReader::getInstance().getBool("enable_merge_vins_bias", false);
+
+            tof_deriv_thresh = ParamReader::getInstance().getDouble("tof_deriv_thresh", 5.0);
+            tof_merge_freq   = ParamReader::getInstance().getDouble("tof_merge_freq", 2.0);
+            tof_ground_bias  = ParamReader::getInstance().getDouble("tof_ground_bias", 0.05);
 
             imu_que_dura_length_ = ParamReader::getInstance().getDouble("imu_que_dura_length", 1.0);
 
@@ -147,6 +156,7 @@ class KfCoordinator {
     void updateWithOdomMeas(const OdomMeasPtr& odom_meas);
     void updateWithZUPT(const ImuMeasPtr& imu_meas);
     void updateWithTofMeas(const TofMeasPtr& imu_meas);
+    bool judgeTofValid(double cur_ground_h, double cur_tof_time);
     const StateManager& getStateManagerRef() const { return state_manager_; }
     StateManager& getStateManagerRef() { return state_manager_; }
     Eigen::Vector3d getImuOriCov();

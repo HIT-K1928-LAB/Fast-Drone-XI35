@@ -65,7 +65,6 @@ void KfInterface::processMeasurements() {
                             break;
                         }
                         case MeasureType::kOpticalFlowRad: {
-                            if (true) break;
                             if (static_check_.isStatic()) break;
                             auto tof_meas = std::static_pointer_cast<TofMeas>(meas);
                             kf_coordiantor_.updateWithTofMeas(tof_meas);
@@ -99,7 +98,9 @@ void KfInterface::init(ros::NodeHandle& nh) {
     sub_odom_     = nh.subscribe(config_.odom_topic, 100, &KfInterface::receiveOdomTopic, this);
     sub_vins_fail_ =
         nh.subscribe(config_.vins_invalid_topic, 100, &KfInterface::receiveVinsInvalidTopic, this);
-    sub_tof_ = nh.subscribe(config_.tof_topic, 100, &KfInterface::receiveTofTopic, this);
+    if (config_.use_tof) {
+        sub_tof_ = nh.subscribe(config_.tof_topic, 100, &KfInterface::receiveTofTopic, this);
+    }
 }
 
 void KfInterface::publishImuOdom(double t) {
