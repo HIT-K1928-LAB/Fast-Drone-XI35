@@ -211,6 +211,10 @@ void Estimator::processMeasurements() {
                 bool is_static = zuptor.zuptDetection(curTime, nullptr, &feature.second);
                 bool is_sccess = zuptor.getResultInfo(curTime, &Zps[frame_count]);
 
+                if (!is_sccess) {
+                    Zps[frame_count].is_static_ = false;
+                }
+
                 if (ENABLE_ZUPT_DEBUG_LOG) {  // DEBUG_ZUPT
 
                     ZuptResultInfo zupt_result_info = Zps[frame_count];
@@ -218,55 +222,63 @@ void Estimator::processMeasurements() {
                     if (is_first) {
                         FILE *f =
                             fopen("/root/Fast-Drone-XI35/vins_output/zupt_result_log.csv", "w");
-                        fprintf(
-                            f,
-                            "t,is_static,acc_raw_x,acc_raw_y,acc_raw_z,gyr_raw_x,gyr_raw_y,gyr_raw_"
-                            "z,Ba_x,Ba_y,Ba_z,Bg_x,Bg_y,Bg_z,Vx,Vy,Vz,qw,qx,qy,qz,frame_count\n");
-                        fclose(f);
-                        is_first = false;
+                        if (f) {
+                            fprintf(
+                                f,
+                                "t,is_static,acc_raw_x,acc_raw_y,acc_raw_z,gyr_raw_x,gyr_raw_y,gyr_raw_"
+                                "z,Ba_x,Ba_y,Ba_z,Bg_x,Bg_y,Bg_z,Vx,Vy,Vz,qw,qx,qy,qz,frame_count\n");
+                            fclose(f);
+                            is_first = false;
+                        }
                     } else {
                         FILE *f =
                             fopen("/root/Fast-Drone-XI35/vins_output/zupt_result_log.csv", "a");
-                        fprintf(
-                            f,
-                            "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n",
-                            zupt_result_info.t_, zupt_result_info.is_static_,
-                            zupt_result_info.acc_raw_(0), zupt_result_info.acc_raw_(1),
-                            zupt_result_info.acc_raw_(2), zupt_result_info.gyr_raw_(0),
-                            zupt_result_info.gyr_raw_(1), zupt_result_info.gyr_raw_(2),
-                            Bas[frame_count](0), Bas[frame_count](1), Bas[frame_count](2),
-                            Bgs[frame_count](0), Bgs[frame_count](1), Bgs[frame_count](2),
-                            Vs[frame_count](0), Vs[frame_count](1), Vs[frame_count](2),
-                            zupt_result_info.q_GI_t_.w(), zupt_result_info.q_GI_t_.x(),
-                            zupt_result_info.q_GI_t_.y(), zupt_result_info.q_GI_t_.z(),
-                            frame_count);
-                        fclose(f);
+                        if (f) {
+                            fprintf(
+                                f,
+                                "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n",
+                                zupt_result_info.t_, zupt_result_info.is_static_,
+                                zupt_result_info.acc_raw_(0), zupt_result_info.acc_raw_(1),
+                                zupt_result_info.acc_raw_(2), zupt_result_info.gyr_raw_(0),
+                                zupt_result_info.gyr_raw_(1), zupt_result_info.gyr_raw_(2),
+                                Bas[frame_count](0), Bas[frame_count](1), Bas[frame_count](2),
+                                Bgs[frame_count](0), Bgs[frame_count](1), Bgs[frame_count](2),
+                                Vs[frame_count](0), Vs[frame_count](1), Vs[frame_count](2),
+                                zupt_result_info.q_GI_t_.w(), zupt_result_info.q_GI_t_.x(),
+                                zupt_result_info.q_GI_t_.y(), zupt_result_info.q_GI_t_.z(),
+                                frame_count);
+                            fclose(f);
+                        }
                     }
 
                     static bool is_first_2 = true;
                     if (is_first_2) {
                         FILE *f =
                             fopen("/root/Fast-Drone-XI35/vins_output/zupt_result_windows.csv", "w");
-                        fprintf(
-                            f,
-                            "t,Zps[0],Zps[1],Zps[2],Zps[3],Zps[4],Zps[5],Zps[6],Zps[7],Zps[8],Zps["
-                            "9],Zps[10]\n");
-                        fclose(f);
-                        is_first_2 = false;
+                        if (f) {
+                            fprintf(
+                                f,
+                                "t,Zps[0],Zps[1],Zps[2],Zps[3],Zps[4],Zps[5],Zps[6],Zps[7],Zps[8],Zps["
+                                "9],Zps[10]\n");
+                            fclose(f);
+                            is_first_2 = false;
+                        }
                     } else {
                         FILE *f =
                             fopen("/root/Fast-Drone-XI35/vins_output/zupt_result_windows.csv", "a");
-                        if (frame_count == WINDOW_SIZE) {
-                            fprintf(f, "%f,", Zps[frame_count].t_);
-                            for (int i = 0; i < WINDOW_SIZE + 1; i++) {
-                                fprintf(f, "%f", Zps[i].t_);
-                                if (i != WINDOW_SIZE)
-                                    fprintf(f, ",");
-                                else
-                                    fprintf(f, "\n");
+                        if (f) {
+                            if (frame_count == WINDOW_SIZE) {
+                                fprintf(f, "%f,", Zps[frame_count].t_);
+                                for (int i = 0; i < WINDOW_SIZE + 1; i++) {
+                                    fprintf(f, "%f", Zps[i].t_);
+                                    if (i != WINDOW_SIZE)
+                                        fprintf(f, ",");
+                                    else
+                                        fprintf(f, "\n");
+                                }
                             }
+                            fclose(f);
                         }
-                        fclose(f);
                     }
 
                 }  // DEBUG_ZUPT
@@ -359,6 +371,7 @@ void Estimator::clearState() {
         dt_buf[i].clear();
         linear_acceleration_buf[i].clear();
         angular_velocity_buf[i].clear();
+        if (USE_ZUPT) Zps[i] = ZuptResultInfo();
 
         if (pre_integrations[i] != nullptr) {
             delete pre_integrations[i];

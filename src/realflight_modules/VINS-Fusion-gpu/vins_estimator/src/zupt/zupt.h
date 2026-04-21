@@ -54,7 +54,13 @@ class LowPassFilter {
 };
 
 struct ZuptResultInfo {
-    ZuptResultInfo() {}
+    ZuptResultInfo() {
+        t_ = -1;
+        is_static_ = false;
+        acc_raw_.setZero();
+        gyr_raw_.setZero();
+        q_GI_t_.setIdentity();
+    }
     ZuptResultInfo(
         double t, bool is_static, const Eigen::Vector3d& acc_raw, const Eigen::Vector3d& gyr_raw,
         const Eigen::Quaterniond& q_GI_t)

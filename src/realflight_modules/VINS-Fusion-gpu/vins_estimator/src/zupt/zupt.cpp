@@ -26,16 +26,14 @@ bool Zupt::zuptDetection(
         acc_filt_buf_.pop_front();
         gyr_filt_buf_.pop_front();
     }
-    mBuf.unlock();
 
     Eigen::Vector3d high_freq_acc;
     Eigen::Vector3d high_freq_gyr;
 
-    mBuf.lock();
     cnt           = 0;
     int total_cnt = 0;
-    for (int i = 0; i < acc_buf_.size(); i++) {
-        if (acc_buf_[i].first > featureBuf_.back().first) break;
+    for (int i = 0; i < (int)acc_buf_.size(); i++) {
+        if (!featureBuf_.empty() && acc_buf_[i].first > featureBuf_.back().first) break;
 
         high_freq_acc = acc_buf_[i].second - acc_filt_buf_[i].second;
         high_freq_gyr = gyr_buf_[i].second - gyr_filt_buf_[i].second;
@@ -49,7 +47,7 @@ bool Zupt::zuptDetection(
         total_cnt++;
     }
 
-    double imu_unstatic_cnt_ratio = (double)cnt / (double)total_cnt;
+    double imu_unstatic_cnt_ratio = (total_cnt > 0) ? (double)cnt / (double)total_cnt : 1.0;
     if (imu_unstatic_cnt_ratio > unstatic_ratio_thr_)
         is_imu_static = false;
     else
@@ -63,12 +61,12 @@ bool Zupt::zuptDetection(
     // is_static = is_imu_static || is_parallax_static;
     is_static = is_imu_static;
 
-    mBuf.unlock();
-
     Eigen::Vector3d acc_raw, gyr_raw;
     Eigen::Quaterniond q_GI;
     getIMURawAndQuaternion(
         t, acc_raw_buf_, gyr_raw_buf_, quaternion_GI_buf_, &acc_raw, &gyr_raw, &q_GI);
+
+    mBuf.unlock();
 
     result_buf_.push_back(ZuptResultInfo(t, is_static, acc_raw, gyr_raw, q_GI));
     while (result_buf_.size() > feature_frame_size_) {
@@ -78,32 +76,39 @@ bool Zupt::zuptDetection(
     if (ENABLE_ZUPT_DEBUG_LOG) {  // DEBUG_ZUPT
 
         static bool is_first = true;
-        mBuf.lock();
         if (is_first) {
             FILE* f = fopen("/root/Fast-Drone-XI35/vins_output/zuptlog.csv", "w");
-            fprintf(
-                f,
-                "t,is_static,is_imu_static,is_parallax_static,imu_unstatic_cnt_ratio,parallax_"
-                "unstatic_cnt_ratio,acc_x,acc_y,acc_z,acc_norm,acc_filt_norm,acc_high_norm,gyr_"
-                "norm,gyr_filt_norm,gyr_high_norm,parallax,accbuf_size,featurebuf_size,total_cnt,"
-                "resultbuf_size\n");
-            fclose(f);
-            is_first = false;
+            if (f) {
+                fprintf(
+                    f,
+                    "t,is_static,is_imu_static,is_parallax_static,imu_unstatic_cnt_ratio,parallax_"
+                    "unstatic_cnt_ratio,acc_x,acc_y,acc_z,acc_norm,acc_filt_norm,acc_high_norm,gyr_"
+                    "norm,gyr_filt_norm,gyr_high_norm,parallax,accbuf_size,featurebuf_size,total_cnt,"
+                    "resultbuf_size\n");
+                fclose(f);
+                is_first = false;
+            }
         } else {
             FILE* f = fopen("/root/Fast-Drone-XI35/vins_output/zuptlog.csv", "a");
-            fprintf(
-                f, "%f,%d,%d,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%ld,%ld,%d,%ld\n", t, is_static,
-                is_imu_static, is_parallax_static, imu_unstatic_cnt_ratio,
-                parallax_unstatic_cnt_ratio, acc_buf_.back().second(0), acc_buf_.back().second(1),
-                acc_buf_.back().second(2), acc_buf_.back().second.norm(),
-                acc_filt_buf_.back().second.norm(),
-                (acc_buf_.back().second - acc_filt_buf_.back().second).norm(),
-                gyr_buf_.back().second.norm(), gyr_filt_buf_.back().second.norm(),
-                (gyr_buf_.back().second - gyr_filt_buf_.back().second).norm(), parallax,
-                acc_buf_.size(), featureBuf_.size(), total_cnt, result_buf_.size());
-            fclose(f);
+            if (f) {
+                mBuf.lock();
+                fprintf(
+                    f, "%f,%d,%d,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%ld,%ld,%d,%ld\n", t, is_static,
+                    is_imu_static, is_parallax_static, imu_unstatic_cnt_ratio,
+                    parallax_unstatic_cnt_ratio, acc_buf_.empty() ? 0.0 : acc_buf_.back().second(0), 
+                    acc_buf_.empty() ? 0.0 : acc_buf_.back().second(1),
+                    acc_buf_.empty() ? 0.0 : acc_buf_.back().second(2), 
+                    acc_buf_.empty() ? 0.0 : acc_buf_.back().second.norm(),
+                    acc_filt_buf_.empty() ? 0.0 : acc_filt_buf_.back().second.norm(),
+                    acc_buf_.empty() ? 0.0 : (acc_buf_.back().second - acc_filt_buf_.back().second).norm(),
+                    gyr_buf_.empty() ? 0.0 : gyr_buf_.back().second.norm(), 
+                    gyr_filt_buf_.empty() ? 0.0 : gyr_filt_buf_.back().second.norm(),
+                    gyr_buf_.empty() ? 0.0 : (gyr_buf_.back().second - gyr_filt_buf_.back().second).norm(), parallax,
+                    acc_buf_.size(), featureBuf_.size(), total_cnt, result_buf_.size());
+                mBuf.unlock();
+                fclose(f);
+            }
         }
-        mBuf.unlock();
 
     }  // DEBUG_ZUPT
 
@@ -115,19 +120,28 @@ void Zupt::getIMURawAndQuaternion(
     std::deque<std::pair<double, Eigen::Vector3d>>& gyr_raw_buf,
     std::deque<std::pair<double, Eigen::Quaterniond>>& q_GI_buf, Eigen::Vector3d* acc_raw_ptr,
     Eigen::Vector3d* gyr_raw_ptr, Eigen::Quaterniond* q_GI_ptr) {
+    if (acc_raw_buf.empty()) {
+        acc_raw_ptr->setZero();
+        gyr_raw_ptr->setZero();
+        q_GI_ptr->setIdentity();
+        return;
+    }
+
     int i, j;
-    for (i = 0; i < acc_raw_buf.size(); i++) {
+    for (i = 0; i < (int)acc_raw_buf.size(); i++) {
         if (acc_raw_buf[i].first > t) break;
     }
     i -= 1;
+    if (i < 0) i = 0;
+    if (i >= (int)acc_raw_buf.size()) i = (int)acc_raw_buf.size() - 1;
 
     double a;
     double t0, t1;
-    if (i < acc_raw_buf.size() - 1) {
+    if (i < (int)acc_raw_buf.size() - 1) {
         j  = i + 1;
         t0 = acc_raw_buf[i].first;
         t1 = acc_raw_buf[j].first;
-        a  = (t - t0) / (t1 - t0);
+        a  = (t1 > t0) ? (t - t0) / (t1 - t0) : 0;
     } else {
         j = i;
         a = 0;
@@ -136,7 +150,10 @@ void Zupt::getIMURawAndQuaternion(
     *acc_raw_ptr = acc_raw_buf[i].second + a * (acc_raw_buf[j].second - acc_raw_buf[i].second);
     *gyr_raw_ptr = gyr_raw_buf[i].second + a * (gyr_raw_buf[j].second - gyr_raw_buf[i].second);
     // *q_GI_ptr = q_GI_buf[i] * Exp(a * Log(q_GI_buf[i].inverse() * q_GI_buf[j]));
-    *q_GI_ptr = q_GI_buf[i].second;
+    if (i < (int)q_GI_buf.size())
+        *q_GI_ptr = q_GI_buf[i].second;
+    else
+        q_GI_ptr->setIdentity();
 
     while (acc_raw_buf.size() > raw_meas_queue_size_) {
         acc_raw_buf.pop_front();
@@ -161,6 +178,7 @@ bool Zupt::getResultInfo(double t, ZuptResultInfo* info) {
         result_buf_.pop_front();
         return true;
     }
+    return false;
 }
 
 void Zupt::inputIMU(
