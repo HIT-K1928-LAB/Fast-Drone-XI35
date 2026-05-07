@@ -382,7 +382,7 @@ make jetson_base
 
 ### 4.2 构建Fast-Drone-XI35工程镜像Dockerfile.jetson
 在Dockerfile.jetson_base的基础上构建，从github上拉取最新的Fast-Drone-XI35并进行编译，加入容器初始化脚本。
-由于dockerhub在国内无法访问，基础环境镜像暂时没有push到远程仓库，通过docker save打包成.tar文件，借助u盘拷贝至宿主机，再通过docker load解压得到基础环境镜像local/fastdronexi35:orin_base_35.3.1。
+由于dockerhub在国内无法访问，基础环境镜像暂时没有push到远程仓库，通过docker save打包成.tar文件，借助u盘拷贝至宿主机，再通过docker load解压得到基础环境镜像fastdronexi35:orin_base_35.3.1。
 要构建Fast-Drone-XI35镜像，在终端执行:
 ```shell
 make jetson
@@ -438,7 +438,7 @@ docker run -itd --privileged=true --network host \
 ②删除工程镜像（fastdronexi35:orin）
 ③删除宿主机Fast-Drone-XI35数据卷
 ④运行make jetson构建新的工程镜像
-上述操作已集成在"update_jetson.sh"脚本中，当需要进行镜像更新时，直接运行该脚本即可，注意需要宿主机有基础环境镜像（tag为"local/fastdronexi35:orin_base_35.3.1"），否则无法构建。
+上述操作已集成在"update_jetson.sh"脚本中，当需要进行镜像更新时，直接运行该脚本即可，注意需要宿主机有基础环境镜像（tag为"fastdronexi35:orin_base_35.3.1"），否则无法构建。
 ### 4.6 容器部署简要流程
 
 首先 clone 本仓库，之后的从构建基础环境镜像到运行容器的整个流程，所有命令在/Docker/Dockerfile目录下执行。
@@ -447,10 +447,9 @@ docker run -itd --privileged=true --network host \
 git clone https://github.com/Longer95479/Fast-Drone-XI35.git
 ```
 
-- 构建基础环境镜像: local/fastdronexi35:orin_base_35.3.1
+- 构建基础环境镜像: fastdronexi35:orin_base_35.3.1
 ```shell
 make jetson_base
-docker tag fastdronexi35:orin_base_35.3.1 local/fastdronexi35:orin_base_35.3.1
 ```
 或者 直接从移动硬盘里加载镜像的 tar 文件
 ```shell

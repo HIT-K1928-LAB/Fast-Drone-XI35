@@ -1,5 +1,9 @@
-FROM local/fastdronexi35:orin_base_35.3.1
+ARG JETSON_BASE_IMAGE=fastdronexi35:orin_base_35.3.1
+FROM ${JETSON_BASE_IMAGE}
 
+ARG USE_PROXY=false
+ARG BUILD_HTTP_PROXY
+ARG BUILD_HTTPS_PROXY
 ARG ROS_VERSION=noetic
 ENV OPENCV_VERSION=4.5.4
 ENV FDRONE_WS=/root/Fast-Drone-XI35
@@ -10,10 +14,11 @@ SHELL ["bash", "-c", "-l"]
 RUN  git config --global http.lowSpeedLimit 0 && \
      git config --global http.lowSpeedTime 999999 && \
      git config --global http.postBuffer 1024288000 && \
-     # optional : set http proxy if unable to successfully execute git clone
-     # git config --global http.proxy 192.168.31.6:7897 && \
-     # git config --global https.proxy 192.168.31.6:7897 && \
-     cd /root && git clone https://github.com/Longer95479/Fast-Drone-XI35.git -b board
+     if [ "$USE_PROXY" = "true" ]; then \
+       export http_proxy="${BUILD_HTTP_PROXY}" https_proxy="${BUILD_HTTPS_PROXY}" \
+              HTTP_PROXY="${BUILD_HTTP_PROXY}" HTTPS_PROXY="${BUILD_HTTPS_PROXY}"; \
+     fi && \
+     cd /root && git clone --depth 1 --branch board https://github.com/Longer95479/Fast-Drone-XI35.git
 WORKDIR ${FDRONE_WS}
 
 # container init

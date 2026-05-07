@@ -24,6 +24,51 @@ docker start fd_runtime
 docker exec -it  fd_runtime bash
 ```
 
+## 代理配置
+
+Docker 镜像构建默认启用代理：
+
+```bash
+USE_PROXY=true
+PROXY_PORT=7897
+```
+
+默认代理地址会根据环境自动选择：
+
+- WSL + Docker Desktop：`http://host.docker.internal:7897`
+- 普通 Ubuntu/Linux：`http://127.0.0.1:7897`
+
+这是因为在 Docker 构建容器内部，`127.0.0.1` 指向容器自身，不一定是宿主机代理；WSL + Docker Desktop 场景下需要使用 `host.docker.internal` 才能让构建容器访问 Windows 上的代理软件。
+
+如果不需要代理：
+
+```bash
+make pc USE_PROXY=false
+make jetson_base USE_PROXY=false
+make jetson USE_PROXY=false
+```
+
+如果代理端口不是 `7897`：
+
+```bash
+make pc PROXY_PORT=7890
+```
+
+如果需要手动指定完整代理地址：
+
+```bash
+make pc CONTAINER_HTTP_PROXY=http://192.168.31.6:7897 CONTAINER_HTTPS_PROXY=http://192.168.31.6:7897
+```
+
+Jetson 构建同样支持这些参数：
+
+```bash
+make jetson_base PROXY_PORT=7897
+make jetson CONTAINER_HTTP_PROXY=http://127.0.0.1:7897 CONTAINER_HTTPS_PROXY=http://127.0.0.1:7897
+```
+
+注意：这里的代理参数主要用于 Dockerfile 构建过程中的 `git clone`、`wget`、`apt`、`pip` 等命令。Docker 自己拉取基础镜像时，仍需要宿主机 Docker daemon / Docker Desktop 能访问对应镜像仓库；如果基础镜像拉取失败，需要另外配置 Docker daemon 代理或 registry mirror。
+
 ## x86 平台
 
 ⚠️ 前置要求
@@ -61,7 +106,7 @@ CUDA Capability Major/Minor version number这个字段的数字就是CUDA_ARCH_B
 ###
 ```
 
-4. 由于需要从docker Hub pull一个base镜像，需要提前解决docker的代理问题，否则会出错
+4. 由于需要从 Docker Hub pull 一个 base 镜像，需要提前解决 Docker daemon 的代理或镜像源问题，否则会出错。上面的 `USE_PROXY` / `CONTAINER_HTTP_PROXY` 只影响 Dockerfile 内部下载依赖，不等同于 Docker daemon 拉镜像的代理配置
 
 参考：
 
@@ -90,17 +135,19 @@ cd Docker/Dockerfile
 make pc
 ```
 
-中间会提示
+`make pc` 会先检查上一级目录是否存在 TensorRT 安装包：
 
-- ⚠️ Please download TensorRT and put it in the parent directory (../) url:https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/secure/8.6.1/tars/TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz
-Press any key to continue...
-安装第一步下载好tensorRT文件到指定位置，此处可按任意键跳过
+```bash
+../TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz
+```
 
-- Do you want to use a proxy? [y/n]
-是否使用代理进行接下来的构建，由于github、国外软件源的存在，不使用代理会有几率存在网络问题，推荐使用代理，回车默认y
+如果文件不存在，脚本会退出。由于 NVIDIA 下载页面需要登录，TensorRT 安装包需要手动下载后放到 `Docker/` 目录下。
 
-- Use default proxy (http://127.0.0.1:7897) (http://127.0.0.1:7897)?
-默认代理地址指向本机代理软件的地址和端口，如果想要更改代理地址，输入n后进行修改。 ⚠️ 注意修改代理地址时，一般HTTP_PROXY和HTTPS_PROXY都是http开头的代理地址
+构建默认使用代理。如果需要关闭代理：
+
+```bash
+make pc USE_PROXY=false
+```
 
 构建完成后
 

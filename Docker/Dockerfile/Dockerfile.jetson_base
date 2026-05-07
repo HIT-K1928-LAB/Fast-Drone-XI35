@@ -4,18 +4,35 @@ LABEL maintainer="bkbk_b <1320832053@qq.com>"
 
 USER root
 
+SHELL ["bash", "-c"]
+
 ARG ROS_VERSION=noetic
+ARG USE_PROXY=false
+ARG BUILD_HTTP_PROXY
+ARG BUILD_HTTPS_PROXY
 #7.2 for Xavier / 8.7 for Orin
 ARG CUDA_ARCH_BIN=8.7
 ARG USE_PROC=8
 ARG ENABLE_NEON="ON"
 ENV OPENCV_VERSION=4.5.4
 ENV FDRONE_WS=/root/Fast-Drone-XI35
+ARG NO_PROXY="localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn,mirrors.ustc.edu.cn"
+ENV http_proxy=${BUILD_HTTP_PROXY} \
+    https_proxy=${BUILD_HTTPS_PROXY} \
+    HTTP_PROXY=${BUILD_HTTP_PROXY} \
+    HTTPS_PROXY=${BUILD_HTTPS_PROXY} \
+    no_proxy=${NO_PROXY} \
+    NO_PROXY=${NO_PROXY}
 
 # Install some essential tools
-RUN apt-get -y update && \
-    TZ=Asia/Beijing apt-get -y install tzdata && \
-    apt-get -y install wget curl \
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Beijing
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    wget \
+    curl \
     lsb-release \
     git \
     vim \
@@ -63,10 +80,10 @@ COPY  ./3rd_party.zip /root
 RUN   unzip /root/3rd_party.zip -d /root
 
 #Install OpenCV4 with CUDA
-RUN   git clone https://github.com/opencv/opencv_contrib.git -b ${OPENCV_VERSION} && \
+RUN   git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv_contrib.git && \
       cp /root/boostdesc_extfiles/*.i ./opencv_contrib/modules/xfeatures2d/src/
-RUN   apt update && \
-      apt install libgtk2.0-dev -y && \
+RUN   apt-get update && \
+      apt-get install -y --no-install-recommends libgtk2.0-dev && \
       wget https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.zip -O opencv.zip && \
       unzip opencv.zip && \
       rm opencv.zip && \
@@ -97,10 +114,9 @@ RUN   apt update && \
             -D BUILD_opencv_apps=OFF \
             -D ENABLE_NEON=${ENABLE_NEON} \
             -D EIGEN_INCLUDE_PATH=/usr/include/eigen3 \
-	      -D WITH_EIGEN=ON \
-            -D ENABLE_NEON=${ENABLE_NEON} \
+            -D WITH_EIGEN=ON \
             -D WITH_IPP=OFF \
-      	-D WITH_OPENCL=OFF \
+            -D WITH_OPENCL=OFF \
             -D PYTHON3_LIBRARY=/usr/lib/aarch64-linux-gnu/libpython3.8.so \
             -D BUILD_LIST=calib3d,features2d,highgui,dnn,imgproc,imgcodecs,\
 cudev,cudaoptflow,cudaimgproc,cudalegacy,cudaarithm,cudacodec,cudastereo,\
@@ -116,28 +132,29 @@ RUN   mkdir -p /root/cv_bridge${OPENCV_VERSION}_ws/src && \
       cd /root/cv_bridge${OPENCV_VERSION}_ws && catkin_make && echo "source /root/cv_bridge${OPENCV_VERSION}_ws/devel/setup.bash" >> /root/.bashrc'
 
 #Install realsense
-RUN   apt-get install -y software-properties-common && \
-      apt-key adv --keyserver keyserver.ubuntu.com --recv-key F6E65AC044F831AC80A06380C8B3A55A6F3EFCDE || \
-      apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-key  F6E65AC044F831AC80A06380C8B3A55A6F3EFCDE && \
-      add-apt-repository "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" -u && \
-      apt-get update -y && \
-      apt install librealsense2-dev=2.55.1-0~realsense.3336 \
-                       librealsense2=2.55.1-0~realsense.3336 \
-                       librealsense2-utils=2.55.1-0~realsense.3336 \
-                       librealsense2-dbg=2.55.1-0~realsense.3336 \
-                       librealsense2-gl=2.55.1-0~realsense.3336 -y  && \
+RUN   apt-get update && \
+      apt-get install -y --no-install-recommends ca-certificates curl && \
+      install -d -m 0755 /etc/apt/keyrings && \
+      curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xFB0B24895113F120" -o /etc/apt/keyrings/librealsense.asc && \
+      echo "deb [signed-by=/etc/apt/keyrings/librealsense.asc] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" > /etc/apt/sources.list.d/librealsense.list && \
+      apt-get update && \
+      apt-get install -y librealsense2-dev=2.55.1-0~realsense.3336 \
+                         librealsense2=2.55.1-0~realsense.3336 \
+                         librealsense2-utils=2.55.1-0~realsense.3336 \
+                         librealsense2-dbg=2.55.1-0~realsense.3336 \
+                         librealsense2-gl=2.55.1-0~realsense.3336 && \
       apt-mark hold librealsense2 librealsense2-dev librealsense2-utils librealsense2-dbg
 
 # Install MAVROS
-RUN   apt-get install -y ros-${ROS_VERSION}-mavros && \
+RUN   apt-get install -y --no-install-recommends ros-${ROS_VERSION}-mavros && \
       cd /opt/ros/${ROS_VERSION}/lib/mavros && \
       ./install_geographiclib_datasets.sh
 
 #Build glog
-RUN   apt-get install -y liblapack-dev libsuitesparse-dev libcxsparse3 libgflags-dev libgoogle-glog-dev libgtest-dev && \
+RUN   apt-get install -y --no-install-recommends autoconf automake libtool liblapack-dev libsuitesparse-dev libcxsparse3 libgflags-dev libgoogle-glog-dev libgtest-dev && \
       cd /root/glog && \
-      chmod +x autogen.sh configure && ./autogen.sh ./configure && \
-      make && make install
+      chmod +x autogen.sh configure && ./autogen.sh && ./configure && \
+      make -j${USE_PROC} && make install
 
 #Build ceres
 RUN   cd /root/ceres-solver-2.0.0rc1 && mkdir build && cd build && \
@@ -145,18 +162,23 @@ RUN   cd /root/ceres-solver-2.0.0rc1 && mkdir build && cd build && \
       rm -rf ../../ceres-solver-2.0.0rc1
 
 #Install LCM
-RUN   cd /root && git clone https://github.com/lcm-proj/lcm && \
+RUN   cd /root && git clone --depth 1 --branch v1.4.0 https://github.com/lcm-proj/lcm && \
       cd lcm && \
-      git checkout tags/v1.4.0 && \
       mkdir build && cd build && \
       cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF .. && \
       make -j${USE_PROC} && make install
 #Install onnxruntime
-RUN   apt install python3-pip -y && \
+RUN   apt-get update && \
+      apt-get install -y --no-install-recommends python3-pip && \
       /usr/bin/pip3 install onnxruntime -i https://pypi.tuna.tsinghua.edu.cn/simple
 #Install dependencies for gscam
-RUN   apt update && apt install -y gstreamer1.0-tools libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-good1.0-dev && \
-      apt install -y ros-${ROS_VERSION}-camera-calibration-parsers \
+RUN   apt-get update && \
+      apt-get install -y --no-install-recommends \
+      gstreamer1.0-tools \
+      libgstreamer1.0-dev \
+      libgstreamer-plugins-base1.0-dev \
+      libgstreamer-plugins-good1.0-dev \
+      ros-${ROS_VERSION}-camera-calibration-parsers \
       ros-${ROS_VERSION}-camera-info-manager
 #BUild OpenCV3.4.16
 COPY  ./opencv-3.4.16.zip /root
@@ -167,7 +189,7 @@ RUN   cd /root && unzip opencv-3.4.16.zip && unzip opencv_contrib-3.4.16.zip && 
       -D CMAKE_INSTALL_PREFIX=/usr/local/opencv-3.4.16 \
       -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib-3.4.16/modules \
       -D WITH_CUDA=ON \
-      -D CUDA_ARCH_BIN=8.7 \
+      -D CUDA_ARCH_BIN=${CUDA_ARCH_BIN} \
       -D CUDNN_VERSION='8.6' \
       -D CUDNN_INCLUDE_DIR=/usr/include/ \
       -D CUDA_ARCH_PTX="" \
@@ -195,5 +217,8 @@ sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd
 EXPOSE 22
 
 # Clean up all temp files
-RUN apt clean && rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* /var/cache/apt/*
-
+RUN apt-get clean && rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* /var/cache/apt/*
+ENV http_proxy= \
+    https_proxy= \
+    HTTP_PROXY= \
+    HTTPS_PROXY=
