@@ -1,0 +1,5 @@
+target_type: 'aprilgrid' # gridtype   标定板类型
+tagCols: 6               # number of apriltags  大黑快数目
+tagRows: 6               # number of apriltags
+tagSize: 0.034244          # size of apriltag, edge to edge [m]  单位m
+tagSpacing: 0.2983588          # ratio of space between tags to tagSize
