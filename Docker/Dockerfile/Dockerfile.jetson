@@ -18,7 +18,7 @@ RUN  git config --global http.lowSpeedLimit 0 && \
        export http_proxy="${BUILD_HTTP_PROXY}" https_proxy="${BUILD_HTTPS_PROXY}" \
               HTTP_PROXY="${BUILD_HTTP_PROXY}" HTTPS_PROXY="${BUILD_HTTPS_PROXY}"; \
      fi && \
-     cd /root && git clone --depth 1 --branch board https://github.com/Longer95479/Fast-Drone-XI35.git
+     cd /root && git clone --depth 1 --branch board https://github.com/HIT-K1928-LAB/Fast-Drone-XI35.git
 WORKDIR ${FDRONE_WS}
 
 # container init
