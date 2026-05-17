@@ -10,7 +10,7 @@ use_bodyrate_ctrl: false
 max_manual_vel: 2.0
 max_angle: 30  # Attitude angle limit in degree. A negative value means no limit.
 low_voltage: 18.0 # 6S battery
-use_motion_capture_odom: true
+use_motion_capture_odom: false
 
 rc_reverse:
     roll: true

@@ -11,7 +11,7 @@ accel_walk_std: 1e-3
 gyro_walk_std: 1e-4
 
 # motion capture
-use_motion_capture: true
+use_motion_capture: false
 
 # bias relevant
 enable_merge_vins_bias: true #融合vins零偏
