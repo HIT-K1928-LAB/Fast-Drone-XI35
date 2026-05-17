@@ -240,9 +240,11 @@ after these settings you will have 250Hz /imu/data_raw /imu/data
 
 ### 3.5 安装ceres与glog与ddyanmic-reconfigure
 
-* 解压`3rd_party.zip`压缩包
+Docker 构建会在线下载并编译 glog 与 ceres；手动安装时可按下面方式获取固定版本源码。
 
-* 进入glog文件夹打开终端
+* `git clone --depth 1 --branch v0.3.5 https://github.com/google/glog.git`
+
+* 进入 glog 文件夹打开终端
 
 * `sudo chmod 777 autogen.sh && sudo chmod 777 configure`
 
@@ -250,7 +252,11 @@ after these settings you will have 250Hz /imu/data_raw /imu/data
 
 * `sudo apt-get install liblapack-dev libsuitesparse-dev libcxsparse3.1.2 libgflags-dev libgoogle-glog-dev libgtest-dev`
 
-* 进入ceres文件夹打开终端
+* `wget https://github.com/ceres-solver/ceres-solver/archive/refs/tags/2.0.0rc1.zip -O ceres-solver-2.0.0rc1.zip`
+
+* `unzip ceres-solver-2.0.0rc1.zip`
+
+* 进入 ceres 文件夹打开终端
 
 * `mkdir build`
 
@@ -264,7 +270,7 @@ after these settings you will have 250Hz /imu/data_raw /imu/data
 
 * `sudo apt-get install ros-noetic-ddynamic-reconfigure`
 
-<font color="#dd0000"> 注意，安装的版本是 `ceres 2.0.0` 版本，编译需使用 `std=c++14` 及以上，后续需把 vinsfusiongpu 里的所有包都改成 c++14 标准 </font>
+<font color="#dd0000"> 注意，安装的版本是 `ceres 2.0.0rc1` 版本，编译需使用 `std=c++14` 及以上，后续需把 vinsfusiongpu 里的所有包都改成 c++14 标准 </font>
 
 ### 3.6 OpenCV 安装
 
@@ -359,128 +365,122 @@ pip install scikit-image
 ```
 
 ## 4 Docker 配置与使用
+
 底层基础镜像：NVIDIA L4T JetPack r35.3.1
 官方镜像地址：https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-jetpack
-### 4.1 构建基础环境镜像Dockerfile.jetson_base
-基础环境镜像包含了运行Fast-Drone-XI35所需要的各种软件库。
-- ros-noetic-base及其部分功能包
-- OpenCV4.5.4-cuda版本
-- cv_bridge4.5.4，适配的opencv4.5.4，已添加进ros环境，功能包名称cv_bridge_454
-- realsense2驱动库
-- mavros功能包
-- glog-0.5
+
+### 4.1 构建 Jetson 镜像 Dockerfile.jetson
+
+Jetson 镜像包含运行 Fast-Drone-XI35 所需要的软件库和容器初始化脚本，不再内置工程源码。工程源码在容器启动时从宿主机目录挂载到 `/root/Fast-Drone-XI35`。
+
+镜像内主要包含：
+- ros-noetic-base 及其部分功能包
+- OpenCV4.5.4-cuda 版本
+- cv_bridge4.5.4，适配 OpenCV4.5.4，已添加进 ROS 环境，功能包名称 cv_bridge_454
+- realsense2 驱动库
+- mavros 功能包
+- glog-0.3.5
 - ceres-2.0.0
 - lcm
+- onnxruntime、scikit-image 等工程运行依赖
 
-部分软件库（ceres、glog和cv_bridge）和编译一些软件库所需要的额外的文件（比如编译opencv_contrib需要一些额外文件）打包进一个压缩包3rd_party.zip，放在docker执行的上下文目录，供构建镜像时解压使用。
-构建环境基础镜像，在终端执行：
-```shell
-make jetson_base
-```
+Docker 构建阶段会在线下载 ceres、glog、cv_bridge、OpenCV 3.4.16 / opencv_contrib 3.4.16，以及 opencv_contrib xfeatures2d 所需的 boostdesc/vgg 额外文件，不再需要把这些源码包预先放进 Docker 构建上下文。
 
-**具体使用见 4.6**
+在 `/Docker/Dockerfile` 目录下执行：
 
-### 4.2 构建Fast-Drone-XI35工程镜像Dockerfile.jetson
-在Dockerfile.jetson_base的基础上构建，从github上拉取最新的Fast-Drone-XI35并进行编译，加入容器初始化脚本。
-由于dockerhub在国内无法访问，基础环境镜像暂时没有push到远程仓库，通过docker save打包成.tar文件，借助u盘拷贝至宿主机，再通过docker load解压得到基础环境镜像fastdronexi35:orin_base_35.3.1。
-要构建Fast-Drone-XI35镜像，在终端执行:
 ```shell
 make jetson
 ```
-初始化脚本"container_init.sh"说明：
-初始化脚本也放在构建镜像的上下文目录，构建阶段拷贝至镜像/root目录下，用于执行启动容器时的一些初始化操作，目前的初始化操作比较简单，主要是启动ssh服务，还有一个操作是改变mavros的px4.launch中的参数用于设配实际硬件，这样避免了重新构建基础镜像。
-### 4.3 容器启动脚本说明
-容器启动脚本“container_run.sh”用于对Fast-Drone-XI35工程镜像执行docker run操作，并实现必要的自定义配置，后续可根据需求进行修改，下面对目前容器启动配置进行详细介绍。
+
+初始化脚本 `container_init.sh` 会在容器启动时执行，用于启动 SSH 服务、配置 LCM 网络、修改 MAVROS 的 `px4.launch` 串口参数，并启动 Jetson 相机相关服务。它不会自动编译 Fast-Drone-XI35 工程。
+
+### 4.2 容器启动脚本说明
+
+容器启动脚本 `container_run.sh` 用于执行 `docker run`，并把宿主机工程目录挂载到容器内。脚本默认会挂载：
+- `${PROJECT_DIR}` -> `/root/Fast-Drone-XI35`
+- `${HOME}/Docker_Data` -> `/root/data`
+- `/dev` -> `/dev`
+- X11 socket、udev、Argus socket、宿主机时间配置等运行时资源（存在时自动挂载）
+
+脚本默认启用 NVIDIA runtime、host 网络、特权模式、X11 转发和 16GB shared memory。可通过环境变量覆盖：
+
 ```shell
-docker run -itd --privileged=true --network host \
-        --mount type=bind,source=${HOME}/Docker_Data,target=/root/data \
-        --mount type=bind,source=/dev,target=/dev \
-        --mount source=Fast-Drone-XI35,target=/root/Fast-Drone-XI35 \
-        --runtime=nvidia --gpus all \
-        --name fd_runtime \
-        fastdronexi35:orin /bin/bash
+CONTAINER_NAME=fd_runtime_jetson IMAGE_NAME=fastdronexi35:orin SHM_SIZE=16g ./container_run.sh
+PROJECT_DIR=/home/zhangrun/code/Fast-Drone-XI35 ./container_run.sh
+ENABLE_X11=false ./container_run.sh
 ```
-- 通过“--privileged=true”赋予容器对宿主机全面的访问权限，再通过“--mount type=bind,source=/dev,target=/dev”挂载宿主机的/dev实现容器对宿主机设备资源的无障碍访问。
-- “--network host”配置容器的网络模式为host主机模式，容器和宿主机共享ip和端口号，相比于需要进行端口映射bridge模式，host模式下更方便远程主机与容器实现双向通信，比如ros多机的场景。但要注意与宿主机端口冲突的问题。
-- “--mount type=bind,source=${HOME}/Docker_Data,target=/root/data”通过bind mounts将宿主机指定目录挂载至容器内。宿主机目录需要提前建立，并且宿主机目录不管是否为空都会覆盖容器目录（相当于在容器内创建了指向宿主机目录的软连接），主要用于共享宿主机数据以及永久性存储容器的数据。
-- “--mount source=Fast-Drone-XI35,target=/root/Fast-Drone-XI35”通过数据卷（volumes）挂载方式，实现Fast-Drone-XI35工程目录在宿主机和容器之间的双向互通，此操作会在宿主机docker目录下创建数据卷，并在启动容器时将容器内的Fast-Drone-XI35挂载到数据卷，类似于软连接，在数据卷中的修改会同步到容器，从而便于在宿主机直接修改代码。注意启动容器时若数据卷不为空，则数据卷会覆盖容器目录。
-- “--runtime=nvidia  --gpus all”使容器能访问gpu，前提是已经装好NVIDIA Container Toolkit，官方安装教程：https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
-### 4.4 VSCode SSH配置
-通过vscode的Remote SSH插件远程连接至宿主机，在资源管理器打开挂载Fast-Drone-XI的数据卷，即可实现代码开发（前提是容器内Fast-Drone-XI正确挂载到宿主机数据卷）。实现步骤如下：
-- 安装remote-ssh插件
+
+常用启动方式：
+
+```shell
+./container_run.sh
+docker exec -it fd_runtime bash
+```
+
+后续重启容器：
+
+```shell
+docker start fd_runtime
+docker exec -it fd_runtime bash
+```
+
+### 4.3 VSCode SSH 配置
+
+可以通过 VSCode 的 Remote SSH 插件远程连接宿主机，直接打开宿主机上的 Fast-Drone-XI35 工程目录进行开发。由于工程目录通过 bind mount 挂载进容器，宿主机和容器会共享同一份源码。
+
+- 安装 remote-ssh 插件
 
 <p align="center">
   <img src="images/image.png" width="50%">
 </p>
 
-- 点击左侧的远程资源管理器，点击“+”新建远程，输入宿主机的用户名和ip，由于访问docker的数据卷需要root权限，所以需要以root身份登录，即用户名为root。
+- 点击左侧的远程资源管理器，点击“+”新建远程，输入宿主机的用户名和 IP。
 
 <p align="center">
   <img src="images/image-1.png" width="40%">
 </p>
 
-如果无法登录，检查宿主机的root密码是否正确，一般情况下ubuntu的root没有初始密码，这种情况下无法以root登录的，需要通过“sudo passwd root”重新设置root密码。
-
-- 登录成功后即可编辑代码，并且修改会同步至容器。
+- 登录成功后即可编辑代码，修改会同步到容器中的 `/root/Fast-Drone-XI35`。
 
 <p align="center">
   <img src="images/image-2.png" width="40%">
 </p>
 
-### 4.5 Fast-Drone-XI35远程同步更新
-需求场景：github远程仓库有更新，需要更新容器内的Fast-Drone-XI35。
-目前有两种更新方式，宿主机更新和工程镜像更新。
-- 宿主机更新：
-容器内Fast-Drone-XI35已挂载到宿主机的docker数据卷，对数据卷的任何操作都会同步到容器内，因此可以对宿主机的Fast-Drone-XI35数据卷使用git pull更新工程。这种更新方式效率高，但是更新发生在宿主机数据卷，没有更新镜像，若要形成新的镜像，需要对容器进行commit。
-- 工程镜像更新：
-重新构建工程镜像，构建时会拉取远程仓库最新的版本，最后生成带有Fast-Drone-XI35最新版本的镜像。主要流程如下：
-①停止并删除正在运行的容器（fd_runtime）
-②删除工程镜像（fastdronexi35:orin）
-③删除宿主机Fast-Drone-XI35数据卷
-④运行make jetson构建新的工程镜像
-上述操作已集成在"update_jetson.sh"脚本中，当需要进行镜像更新时，直接运行该脚本即可，注意需要宿主机有基础环境镜像（tag为"fastdronexi35:orin_base_35.3.1"），否则无法构建。
-### 4.6 容器部署简要流程
+### 4.4 容器部署简要流程
 
-首先 clone 本仓库，之后的从构建基础环境镜像到运行容器的整个流程，所有命令在/Docker/Dockerfile目录下执行。
+首先 clone 本仓库，之后所有命令在 `/Docker/Dockerfile` 目录下执行。
 
 ```shell
 git clone https://github.com/Longer95479/Fast-Drone-XI35.git
+cd Fast-Drone-XI35/Docker/Dockerfile
 ```
 
-- 构建基础环境镜像: fastdronexi35:orin_base_35.3.1
-```shell
-make jetson_base
-```
-或者 直接从移动硬盘里加载镜像的 tar 文件
-```shell
-sudo docker load -i fastdronexi35_base.tar
-```
+构建 Jetson 镜像：
 
-- 在本工程的 `/Docker/Dockerfile`下执行命令，构建工程镜像: fastdronexi35:orin
 ```shell
 make jetson
 ```
-- 首次编译完成后，执行容器启动脚本
+
+首次启动容器：
+
 ```shell
 ./container_run.sh
 ```
 
-后续重启后，只需执行以下命令启动容器
-```shell
-sudo docker start fd_runtime
-```
-
-- 进入容器的 bash
+进入容器并按需手动编译工程：
 
 ```shell
-sudo docker exec -it  fd_runtime bash
+docker exec -it fd_runtime bash
+cd /root/Fast-Drone-XI35
+catkin_make -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release
+source devel/setup.bash
 ```
 
-- 如果需要更新工程镜像，则执行
+如果需要重建镜像，则执行：
+
 ```shell
 ./update_jetson.sh
 ```
-
 ## 5 代码编译与启动流程
 
 ### 5.1 前置准备

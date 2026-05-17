@@ -2,26 +2,43 @@
 
 ## nvidia jetson平台
 
-1. 构建基础镜像
+1. 构建 Jetson 镜像
 
 ```bash
-make jetson_base
-```
-
-2. 构建工程镜像
-
-```bash
+cd Docker/Dockerfile
 make jetson
 ```
 
-3. 容器启动
+Jetson 镜像直接包含运行环境和容器初始化脚本，不再单独拆分基础镜像。
+
+2. 容器启动
+
+`container_run.sh` 会自动把当前宿主机工程目录挂载到容器的 `/root/Fast-Drone-XI35`，不再使用 `Fast-Drone-XI35` named volume。脚本默认开启 X11 转发，保留镜像 entrypoint，所以容器启动时仍会执行 `container_init.sh` 来配置 SSH、LCM、MAVROS 和相机服务。
 
 ```bash
 ### 首次容器启动
 ./container_run.sh
 ### 后续容器启动
 docker start fd_runtime
-docker exec -it  fd_runtime bash
+docker exec -it fd_runtime bash
+```
+
+可按需覆盖运行参数：
+
+```bash
+CONTAINER_NAME=fd_runtime_jetson IMAGE_NAME=fastdronexi35:orin SHM_SIZE=16g ./container_run.sh
+PROJECT_DIR=/home/your_account/code/Fast-Drone-XI35 ./container_run.sh
+ENABLE_X11=false ./container_run.sh
+```
+
+3. 编译工程
+
+容器启动时不会自动执行 `catkin_make`。进入容器后按需手动编译：
+
+```bash
+cd /root/Fast-Drone-XI35
+catkin_make -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release
+source devel/setup.bash
 ```
 
 ## 代理配置
@@ -44,7 +61,6 @@ PROXY_PORT=7897
 
 ```bash
 make pc USE_PROXY=false
-make jetson_base USE_PROXY=false
 make jetson USE_PROXY=false
 ```
 
@@ -63,7 +79,7 @@ make pc CONTAINER_HTTP_PROXY=http://192.168.31.6:7897 CONTAINER_HTTPS_PROXY=http
 Jetson 构建同样支持这些参数：
 
 ```bash
-make jetson_base PROXY_PORT=7897
+make jetson PROXY_PORT=7897
 make jetson CONTAINER_HTTP_PROXY=http://127.0.0.1:7897 CONTAINER_HTTPS_PROXY=http://127.0.0.1:7897
 ```
 

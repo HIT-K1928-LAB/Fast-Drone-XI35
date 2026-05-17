@@ -16,6 +16,10 @@ ARG ROS_VERSION=noetic
 ARG USE_PROC=8
 ARG ENABLE_NEON="OFF"
 ENV OPENCV_VERSION=4.5.4
+ARG OPENCV3_VERSION=3.4.16
+ARG GLOG_VERSION=v0.3.5
+ARG CERES_VERSION=2.0.0rc1
+ARG VISION_OPENCV_VERSION=1.16.2
 ENV FDRONE_WS=/root/Fast-Drone-XI35
 ARG NO_PROXY="localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn,mirrors.ustc.edu.cn"
 ENV http_proxy=${BUILD_HTTP_PROXY} \
@@ -86,10 +90,30 @@ RUN sh -c 'echo "deb http://mirrors.ustc.edu.cn/ros/ubuntu/ `lsb_release -cs` ma
       ros-${ROS_VERSION}-vrpn-client-ros && \
       echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc
 
-# Unzip the 3rd_party
+# Download third-party source dependencies
 WORKDIR /tmp
-COPY  ./3rd_party.zip /tmp
-RUN   unzip /tmp/3rd_party.zip -d /tmp
+RUN   mkdir -p /tmp/boostdesc_extfiles && \
+      for file in boostdesc_bgm.i boostdesc_bgm_bi.i boostdesc_bgm_hd.i \
+                  boostdesc_binboost_064.i boostdesc_binboost_128.i boostdesc_binboost_256.i \
+                  boostdesc_lbgm.i; do \
+          wget -q https://raw.githubusercontent.com/opencv/opencv_3rdparty/contrib_xfeatures2d_boostdesc_20161012/${file} \
+               -O /tmp/boostdesc_extfiles/${file}; \
+      done && \
+      for file in vgg_generated_48.i vgg_generated_64.i vgg_generated_80.i vgg_generated_120.i; do \
+          wget -q https://raw.githubusercontent.com/opencv/opencv_3rdparty/contrib_xfeatures2d_vgg_20160317/${file} \
+               -O /tmp/boostdesc_extfiles/${file}; \
+      done && \
+      git clone --depth 1 --branch ${GLOG_VERSION} https://github.com/google/glog.git /tmp/glog && \
+      wget -q https://github.com/ceres-solver/ceres-solver/archive/refs/tags/${CERES_VERSION}.zip -O /tmp/ceres-solver.zip && \
+      unzip -q /tmp/ceres-solver.zip -d /tmp && \
+      rm /tmp/ceres-solver.zip && \
+      wget -q https://github.com/ros-perception/vision_opencv/archive/refs/tags/${VISION_OPENCV_VERSION}.zip -O /tmp/vision_opencv.zip && \
+      unzip -q /tmp/vision_opencv.zip -d /tmp && \
+      mv /tmp/vision_opencv-${VISION_OPENCV_VERSION}/cv_bridge /tmp/cv_bridge${OPENCV_VERSION} && \
+      rm -rf /tmp/vision_opencv-${VISION_OPENCV_VERSION} /tmp/vision_opencv.zip && \
+      sed -i 's|^project(cv_bridge)$|project(cv_bridge_454)|' /tmp/cv_bridge${OPENCV_VERSION}/CMakeLists.txt && \
+      sed -i '/^set(_opencv_version 4)/i set(OpenCV_DIR /usr/local/opencv-4.5.4/lib/cmake/opencv4)' /tmp/cv_bridge${OPENCV_VERSION}/CMakeLists.txt && \
+      sed -i 's|<name>cv_bridge</name>|<name>cv_bridge_454</name>|' /tmp/cv_bridge${OPENCV_VERSION}/package.xml
 
 # Install OpenCV4 with CUDA
 RUN   git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv_contrib.git && \
@@ -193,14 +217,17 @@ RUN   apt-get update && \
       ros-${ROS_VERSION}-camera-calibration-parsers \
       ros-${ROS_VERSION}-camera-info-manager
 
-# Build OpenCV3.4.16
-COPY  ./opencv-3.4.16.zip /tmp
-COPY  ./opencv_contrib-3.4.16.zip /tmp
-RUN   cd /tmp && unzip opencv-3.4.16.zip && unzip opencv_contrib-3.4.16.zip && \
-      cd /tmp/opencv-3.4.16 && mkdir build && cd build && \
+# Build OpenCV3
+RUN   cd /tmp && \
+      wget -q https://github.com/opencv/opencv/archive/refs/tags/${OPENCV3_VERSION}.zip -O opencv-${OPENCV3_VERSION}.zip && \
+      wget -q https://github.com/opencv/opencv_contrib/archive/refs/tags/${OPENCV3_VERSION}.zip -O opencv_contrib-${OPENCV3_VERSION}.zip && \
+      unzip -q opencv-${OPENCV3_VERSION}.zip && \
+      unzip -q opencv_contrib-${OPENCV3_VERSION}.zip && \
+      rm opencv-${OPENCV3_VERSION}.zip opencv_contrib-${OPENCV3_VERSION}.zip && \
+      cd /tmp/opencv-${OPENCV3_VERSION} && mkdir build && cd build && \
       cmake -D CMAKE_BUILD_TYPE=RELEASE \
-      -D CMAKE_INSTALL_PREFIX=/usr/local/opencv-3.4.16 \
-      -D OPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib-3.4.16/modules \
+      -D CMAKE_INSTALL_PREFIX=/usr/local/opencv-${OPENCV3_VERSION} \
+      -D OPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib-${OPENCV3_VERSION}/modules \
       -D WITH_CUDA=ON \
       -D CUDA_ARCH_BIN=${CUDA_ARCH_BIN} \
       -D CUDNN_VERSION='8.9.6' \
