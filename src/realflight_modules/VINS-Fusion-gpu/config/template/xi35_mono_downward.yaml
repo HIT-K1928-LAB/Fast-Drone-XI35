@@ -1,8 +1,8 @@
 %YAML:1.0
 
 #common parameters
-#support: 1 imu 1 cam; 1 imu 2 cam: 2 cam; 
-imu: 1         
+#support: 1 imu 1 cam; 1 imu 2 cam: 2 cam;
+imu: 1
 num_of_cam: 1
 
 
@@ -18,7 +18,7 @@ output_path: "/home/orin01/vins_output"
 cam0_calib: "mono_downward.yaml"
 image_width: 640
 image_height: 480
-   
+
 
 # Extrinsic parameter between IMU and Camera.
 estimate_extrinsic: 1   # 0  Have an accurate extrinsic parameters. We will trust the following imu^R_cam, imu^T_cam, don't change it.
@@ -47,15 +47,13 @@ estimate_extrinsic: 1   # 0  Have an accurate extrinsic parameters. We will trus
 #       0., 2.8e-02, 0., 0., 0., 1. ]
 
 body_T_cam0: !!opencv-matrix
-   rows: 4
-   cols: 4
-   dt: d
-   data: [ 7.071067811865475e-01, 7.071067811865475e-01,
-       0., -3e-03,
-       7.071067811865475e-01, -7.071067811865475e-01,
-       0., -1.2e-02,
-       0., 0.,
-       -1.0, -1.7e-02, 0., 0., 0., 1. ]
+    rows: 4
+    cols: 4
+    dt: d
+    data: [ 7.071067811865475e-01,  7.071067811865475e-01,  0.,     -3e-03,
+            7.071067811865475e-01,  -7.071067811865475e-01, 0.,     -1.2e-02,
+            0.,                     0.,                     -1.0,   -1.7e-02,
+            0.,                     0.,                     0.,     1. ]
 
 #Multiple thread support
 multiple_thread: 1
@@ -64,8 +62,8 @@ use_gpu_acc_flow: 1
 
 #feature traker paprameters
 max_cnt: 150            # max feature number in feature tracking
-min_dist: 30            # min distance between two features 
-freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image 
+min_dist: 30            # min distance between two features
+freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image
 F_threshold: 1.0        # ransac threshold (pixel)
 show_track: 1           # publish tracking image as topic
 flow_back: 1            # perform forward and backward optical flow to improve feature tracking accuracy
@@ -90,5 +88,4 @@ td: -0.01                            # initial value of time offset. unit: s. re
 #loop closure parameters
 load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
 pose_graph_save_path: "/home/orin01/savedfiles/output/pose_graph/" # save and load path
-save_image: 1                   # save image in pose graph for visualization prupose; you can close this function by setting 0 
-
+save_image: 1                   # save image in pose graph for visualization prupose; you can close this function by setting 0
