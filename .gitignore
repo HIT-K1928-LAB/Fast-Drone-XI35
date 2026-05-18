@@ -13,3 +13,12 @@ libcustom_layernorm.so
 
 # Windows downloaded-file metadata.
 *:Zone.Identifier
+
+# Per-airframe runtime configs. Keep real drone config files local, and commit
+# only the templates under config/template.
+/src/realflight_modules/VINS-Fusion-gpu/config/*
+!/src/realflight_modules/VINS-Fusion-gpu/config/template/
+!/src/realflight_modules/VINS-Fusion-gpu/config/template/**
+/src/realflight_modules/px4ctrl/config/*
+!/src/realflight_modules/px4ctrl/config/template/
+!/src/realflight_modules/px4ctrl/config/template/**
