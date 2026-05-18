@@ -617,6 +617,24 @@ python3 set_global_config.py global_config_indoor.yaml
 
 pid 的参数需单独在 `Fast-Drone-XI35/src/realflight_modules/px4ctrl/config` 文件内修改。
 
+### 5.4 多机配置流程
+
+不同无人机的双目、IMU、控制参数等实机配置不要直接提交到 Git。仓库只维护 `config/template` 下的模板文件，实际飞行使用的配置文件放在各自的 `config` 根目录下，并由 `.gitignore` 保持为本地文件。
+
+新飞机首次部署时，从模板初始化本机配置：
+
+```bash
+cd Fast-Drone-XI35/src/realflight_modules/VINS-Fusion-gpu/config
+cp -n template/* .
+
+cd Fast-Drone-XI35/src/realflight_modules/px4ctrl/config
+cp -n template/* .
+```
+
+之后只修改复制出来的本机配置，例如 `fast_drone_250.yaml`、`left.yaml`、`right.yaml`、`ctrl_param_fpv.yaml` 等。模板文件只用于说明字段和提供默认结构，不要把某一架飞机的真实标定参数、外参、PID 或场地参数写回 `template/`。
+
+如果模板结构确实需要变化，先更新 `template/`，再同步更新对应 `config/README.md`，让每架飞机按新的模板重新补齐本地配置。
+
 
 ## 6 开发流程
 ### 曲线日志的使用与解析

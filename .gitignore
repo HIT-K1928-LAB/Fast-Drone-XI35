@@ -15,10 +15,12 @@ libcustom_layernorm.so
 *:Zone.Identifier
 
 # Per-airframe runtime configs. Keep real drone config files local, and commit
-# only the templates under config/template.
+# only the templates under config/template plus per-directory README docs.
 /src/realflight_modules/VINS-Fusion-gpu/config/*
+!/src/realflight_modules/VINS-Fusion-gpu/config/README.md
 !/src/realflight_modules/VINS-Fusion-gpu/config/template/
 !/src/realflight_modules/VINS-Fusion-gpu/config/template/**
 /src/realflight_modules/px4ctrl/config/*
+!/src/realflight_modules/px4ctrl/config/README.md
 !/src/realflight_modules/px4ctrl/config/template/
 !/src/realflight_modules/px4ctrl/config/template/**
