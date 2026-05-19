@@ -174,7 +174,7 @@ RUN   mkdir -p /tmp/opencv-build/boostdesc_extfiles && \
             -D WITH_IPP=OFF \
             -D WITH_OPENCL=OFF \
             -D PYTHON3_LIBRARY=/usr/lib/aarch64-linux-gnu/libpython3.8.so \
-            -D BUILD_LIST="calib3d,features2d,highgui,dnn,imgproc,imgcodecs,cudev,cudaoptflow,cudaimgproc,cudalegacy,cudaarithm,cudacodec,cudastereo,cudafeatures2d,xfeatures2d,tracking,stereo,aruco,videoio,ccalib" && \
+            -D BUILD_LIST="calib3d,features2d,highgui,dnn,imgproc,imgcodecs,photo,cudev,cudaoptflow,cudaimgproc,cudalegacy,cudaarithm,cudacodec,cudastereo,cudafeatures2d,xfeatures2d,tracking,stereo,aruco,videoio,ccalib" && \
       make -j${USE_PROC} && \
       make install && \
       rm -rf /tmp/opencv-build /var/lib/apt/lists/* /var/cache/apt/*
