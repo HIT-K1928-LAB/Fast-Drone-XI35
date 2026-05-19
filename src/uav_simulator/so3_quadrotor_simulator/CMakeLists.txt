@@ -12,6 +12,8 @@ find_package(catkin REQUIRED COMPONENTS
   quadrotor_msgs
   uav_utils
   cmake_utils
+  tf2_ros
+  roslib
 )
 
 ###########

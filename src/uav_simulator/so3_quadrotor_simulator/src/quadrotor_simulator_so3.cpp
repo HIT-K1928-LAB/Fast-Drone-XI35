@@ -3,8 +3,12 @@
 #include <quadrotor_msgs/SO3Command.h>
 #include <quadrotor_simulator/Quadrotor.h>
 #include <ros/ros.h>
+#include <ros/package.h>
 #include <sensor_msgs/Imu.h>
+#include <geometry_msgs/TransformStamped.h>
+#include <tf2_ros/transform_broadcaster.h>
 #include <uav_utils/geometry_utils.h>
+#include "visualization_msgs/Marker.h"
 
 typedef struct _Control
 {
@@ -35,6 +39,10 @@ void stateToOdomMsg(const QuadrotorSimulator::Quadrotor::State& state,
                     nav_msgs::Odometry&                         odom);
 void quadToImuMsg(const QuadrotorSimulator::Quadrotor& quad,
                   sensor_msgs::Imu&                    imu);
+void odomToTF(const nav_msgs::Odometry& odom_msg,
+              geometry_msgs::TransformStamped& transformStamped);
+void odomToMesh(const nav_msgs::Odometry& odom_msg, 
+                visualization_msgs::Marker& meshROS);
 
 static Control
 getControl(const QuadrotorSimulator::Quadrotor& quad, const Command& cmd)
@@ -205,6 +213,10 @@ main(int argc, char** argv)
 
   ros::Publisher  odom_pub = n.advertise<nav_msgs::Odometry>("odom", 100);
   ros::Publisher  imu_pub  = n.advertise<sensor_msgs::Imu>("imu", 10);
+  ros::Publisher  mesh_pub = n.advertise<visualization_msgs::Marker>("uav", 1);
+
+  tf2_ros::TransformBroadcaster tf_broadcaster;
+
   ros::Subscriber cmd_sub =
     n.subscribe("cmd", 100, &cmd_callback, ros::TransportHints().tcpNoDelay());
   ros::Subscriber f_sub =
@@ -242,12 +254,15 @@ main(int argc, char** argv)
   Control control;
 
   nav_msgs::Odometry odom_msg;
-  odom_msg.header.frame_id = "/world";
+  odom_msg.header.frame_id = "world";
   odom_msg.child_frame_id  = "/" + quad_name;
 
   sensor_msgs::Imu imu;
-  imu.header.frame_id = "/simulator";
+  imu.header.frame_id = "world";
+  
+  geometry_msgs::TransformStamped transformStamped;
 
+  visualization_msgs::Marker meshROS;
   /*
   command.force[0] = 0;
   command.force[1] = 0;
@@ -267,6 +282,7 @@ main(int argc, char** argv)
   ros::Time next_odom_pub_time = ros::Time::now();
   while (n.ok())
   {
+    ros::Time t_loop_start = ros::Time::now();
     ros::spinOnce();
 
     auto last = control;
@@ -292,10 +308,20 @@ main(int argc, char** argv)
       state                 = quad.getState();
       stateToOdomMsg(state, odom_msg);
       quadToImuMsg(quad, imu);
+      odomToTF(odom_msg, transformStamped);
       odom_pub.publish(odom_msg);
       imu_pub.publish(imu);
+      tf_broadcaster.sendTransform(transformStamped);
+      if (mesh_pub.getNumSubscribers() > 0) {
+        odomToMesh(odom_msg, meshROS);
+        mesh_pub.publish(meshROS);
+      }
     }
 
+    double loop_time = (ros::Time::now() - t_loop_start).toSec();
+
+    if (loop_time > dt)
+        ROS_WARN("Simulator loop overrun: loop_time = %.2f ms > expected %.2f ms!", loop_time * 1000.0, dt * 1000.0);
     r.sleep();
   }
 
@@ -343,4 +369,42 @@ quadToImuMsg(const QuadrotorSimulator::Quadrotor& quad, sensor_msgs::Imu& imu)
   imu.linear_acceleration.x = quad.getAcc()[0];
   imu.linear_acceleration.y = quad.getAcc()[1];
   imu.linear_acceleration.z = quad.getAcc()[2];
+}
+
+
+void 
+odomToTF(const nav_msgs::Odometry& odom_msg, geometry_msgs::TransformStamped& transformStamped) {
+  transformStamped.header.stamp = odom_msg.header.stamp;
+  transformStamped.header.frame_id = "world";
+  transformStamped.child_frame_id = "odom";
+
+  transformStamped.transform.translation.x = odom_msg.pose.pose.position.x;
+  transformStamped.transform.translation.y = odom_msg.pose.pose.position.y;
+  transformStamped.transform.translation.z = odom_msg.pose.pose.position.z;
+
+  transformStamped.transform.rotation = odom_msg.pose.pose.orientation;
+}
+
+void 
+odomToMesh(const nav_msgs::Odometry& odom_msg, visualization_msgs::Marker& meshROS) {
+  meshROS.mesh_resource = "file://" + ros::package::getPath("so3_quadrotor_simulator") + "/config/uav.dae";
+  meshROS.mesh_use_embedded_materials = true;
+
+  meshROS.header = odom_msg.header;
+  meshROS.header.frame_id = "world";
+
+  meshROS.ns     = "mesh";
+  meshROS.id     = 0;
+  meshROS.type   = visualization_msgs::Marker::MESH_RESOURCE;
+  meshROS.action = visualization_msgs::Marker::ADD;
+
+  meshROS.pose = odom_msg.pose.pose;
+
+  meshROS.scale.x = 2.0;
+  meshROS.scale.y = 2.0;
+  meshROS.scale.z = 2.0;
+  meshROS.color.r = 1.0;
+  meshROS.color.g = 1.0;
+  meshROS.color.b = 1.0;
+  meshROS.color.a = 1.0;
 }

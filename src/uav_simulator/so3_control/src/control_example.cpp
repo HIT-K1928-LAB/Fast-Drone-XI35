@@ -31,7 +31,7 @@ int main(int argc, char **argv)
       ros::spinOnce();
     }
 
-    /*** example 1: position control ***/
+    /*** example 2: velocity control ***/
     std::cout << "\033[42m"
               << "Velocity Control to (-1,0,0) meters/second"
               << "\033[0m" << std::endl;
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
       ros::spinOnce();
     }
 
-    /*** example 1: accelleration control ***/
+    /*** example 3: accelleration control ***/
     std::cout << "\033[42m"
               << "Accelleration Control to (1,0,0) meters/second^2"
               << "\033[0m" << std::endl;

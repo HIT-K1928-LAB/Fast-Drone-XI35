@@ -54,9 +54,9 @@ SO3Control::calculateControl(const Eigen::Vector3d& des_pos,
   if ( flag_use_vel ) totalError.noalias() += des_vel - vel_;
   if ( flag_use_acc ) totalError.noalias() += des_acc - acc_;
 
-  Eigen::Vector3d ka(fabs(totalError[0]) > 3 ? 0 : (fabs(totalError[0]) * 0.2),
-                     fabs(totalError[1]) > 3 ? 0 : (fabs(totalError[1]) * 0.2),
-                     fabs(totalError[2]) > 3 ? 0 : (fabs(totalError[2]) * 0.2));
+  Eigen::Vector3d ka(fabs(totalError[0]) > 3 ? 0 : (fabs(totalError[0]) * 0.0),
+                     fabs(totalError[1]) > 3 ? 0 : (fabs(totalError[1]) * 0.0),
+                     fabs(totalError[2]) > 3 ? 0 : (fabs(totalError[2]) * 0.0));
 
   // std::cout << des_pos.transpose() << std::endl;
   // std::cout << des_vel.transpose() << std::endl;
@@ -73,7 +73,7 @@ SO3Control::calculateControl(const Eigen::Vector3d& des_pos,
   if ( flag_use_acc ) force_.noalias() += mass_ * ka.asDiagonal() * (des_acc - acc_) + mass_ * (des_acc);
 
   // Limit control angle to 45 degree
-  double          theta = M_PI / 2;
+  double          theta = M_PI / 4;
   double          c     = cos(theta);
   Eigen::Vector3d f;
   f.noalias() = force_ - mass_ * g_ * Eigen::Vector3d(0, 0, 1);
