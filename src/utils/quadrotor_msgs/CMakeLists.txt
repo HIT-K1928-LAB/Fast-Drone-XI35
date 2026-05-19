@@ -44,6 +44,11 @@ add_message_files(
   TakeoffLand.msg
 )
 
+add_service_files(
+  FILES
+  SetTakeoffLand.srv
+)
+
 generate_messages(
     DEPENDENCIES
     geometry_msgs
@@ -74,4 +79,3 @@ include_directories(${EIGEN3_INCLUDE_DIR})
 #     decode_msgs 
 #     encode_msgs
 # )
-
