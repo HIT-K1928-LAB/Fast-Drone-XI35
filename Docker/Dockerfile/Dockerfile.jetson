@@ -63,8 +63,8 @@ RUN apt-get update && \
     libtool \
     htop \
     gdb \
-    clangd-12 \
-    clang-format-12 \
+    clangd-18 \
+    clang-format-18 \
     zip unzip \
     libdw-dev \
     libatlas-base-dev \
@@ -108,8 +108,10 @@ RUN apt-get update && \
     libgstreamer-plugins-good1.0-dev \
     ros-${ROS_VERSION}-camera-calibration-parsers \
     ros-${ROS_VERSION}-camera-info-manager && \
-    update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-12 100 && \
-    update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-12 100 && \
+    update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-18 180 && \
+    update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 180 && \
+    update-alternatives --set clangd /usr/bin/clangd-18 && \
+    update-alternatives --set clang-format /usr/bin/clang-format-18 && \
     apt-mark hold librealsense2 librealsense2-dev librealsense2-utils librealsense2-dbg && \
     echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*
