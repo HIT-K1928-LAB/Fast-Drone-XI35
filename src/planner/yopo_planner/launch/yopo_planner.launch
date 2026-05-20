@@ -1,6 +1,6 @@
 <launch>
-  <arg name="onnx_file" default="$(find yopo_planner)/model/yopo_epoch50.onnx"/>
-  <arg name="engine_file" default="$(find yopo_planner)/model/yopo_epoch50.engine"/>
+  <arg name="onnx_file" default="$(find yopo_planner)/model/yopo.onnx"/>
+  <arg name="engine_file" default="$(find yopo_planner)/model/yopo.engine"/>
   <arg name="odom_topic" default="/sim/odom"/>
   <arg name="depth_topic" default="/depth_image"/>
   <arg name="ctrl_topic" default="/so3_control/pos_cmd"/>
