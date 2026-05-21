@@ -36,10 +36,12 @@ struct CudaException : public std::exception
       description << "cudaError code: " << cudaGetErrorString(err_);
       description << " (" << err_ << ")" << std::endl;
     }
-    return description.str().c_str();
+    description_cache_ = description.str();
+    return description_cache_.c_str();
   }
   std::string what_;
   cudaError err_;
+  mutable std::string description_cache_;
 };
 
 #endif /* RMD_CUDA_EXCEPTION_CUH_ */
