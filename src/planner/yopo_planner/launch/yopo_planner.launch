@@ -1,16 +1,8 @@
 <launch>
-  <arg name="onnx_file" default="$(find yopo_planner)/model/yopo.onnx"/>
-  <arg name="engine_file" default="$(find yopo_planner)/model/yopo.engine"/>
+  <arg name="config_file" default="$(find yopo_planner)/config/yopo_planner_real.yaml"/>
   <arg name="odom_topic" default="/vins_fusion/imu_propagate"/>
   <arg name="depth_topic" default="/camera/depth/image_rect_raw"/>
-  <arg name="ctrl_topic" default="/so3_control/pos_cmd"/>
-  <arg name="visualize" default="true"/>
-  <arg name="verbose" default="false"/>
-  <arg name="pitch_angle_deg" default="0.0"/>
-  <arg name="plan_from_reference" default="false"/>
-  <arg name="goal_x" default="50.0"/>
-  <arg name="goal_y" default="0.0"/>
-  <arg name="goal_z" default="2.0"/>
+  <arg name="ctrl_topic" default="/position_cmd"/>
   <arg name="record_log" default="true"/>
   <arg name="log_dir" default="$(find yopo_planner)/../../../log"/>
   <arg name="bag_prefix" default="yopo_log"/>
@@ -24,18 +16,7 @@
   <arg name="local_map_size_z" default="4.0"/>
 
   <node name="yopo_planner_node" pkg="yopo_planner" type="yopo_planner_node" output="screen">
-    <param name="onnx_file" value="$(arg onnx_file)"/>
-    <param name="engine_file" value="$(arg engine_file)"/>
-    <param name="odom_topic" value="$(arg odom_topic)"/>
-    <param name="depth_topic" value="$(arg depth_topic)"/>
-    <param name="ctrl_topic" value="$(arg ctrl_topic)"/>
-    <param name="visualize" value="$(arg visualize)"/>
-    <param name="verbose" value="$(arg verbose)"/>
-    <param name="pitch_angle_deg" value="$(arg pitch_angle_deg)"/>
-    <param name="plan_from_reference" value="$(arg plan_from_reference)"/>
-    <param name="goal_x" value="$(arg goal_x)"/>
-    <param name="goal_y" value="$(arg goal_y)"/>
-    <param name="goal_z" value="$(arg goal_z)"/>
+    <rosparam command="load" file="$(arg config_file)" subst_value="true"/>
   </node>
 
   <node if="$(arg record_log)"

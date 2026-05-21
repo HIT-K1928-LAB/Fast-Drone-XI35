@@ -1,13 +1,9 @@
 <launch>
-  <arg name="onnx_file" default="$(find yopo_planner)/model/yopo.onnx"/>
-  <arg name="engine_file" default="$(find yopo_planner)/model/yopo.engine"/>
+  <arg name="config_file" default="$(find yopo_planner)/config/yopo_planner_sim.yaml"/>
 
   <arg name="init_x" default="0.0"/>
   <arg name="init_y" default="0.0"/>
   <arg name="init_z" default="2.0"/>
-  <arg name="goal_x" default="50.0"/>
-  <arg name="goal_y" default="0.0"/>
-  <arg name="goal_z" default="2.0"/>
 
   <arg name="map_size_x" default="30.0"/>
   <arg name="map_size_y" default="20.0"/>
@@ -101,14 +97,10 @@
   </node>
 
   <include file="$(find yopo_planner)/launch/yopo_planner.launch">
-    <arg name="onnx_file" value="$(arg onnx_file)"/>
-    <arg name="engine_file" value="$(arg engine_file)"/>
+    <arg name="config_file" value="$(arg config_file)"/>
     <arg name="odom_topic" value="/sim/odom"/>
     <arg name="depth_topic" value="/pcl_render_node/depth"/>
     <arg name="ctrl_topic" value="/so3_control/pos_cmd"/>
-    <arg name="goal_x" value="$(arg goal_x)"/>
-    <arg name="goal_y" value="$(arg goal_y)"/>
-    <arg name="goal_z" value="$(arg goal_z)"/>
     <arg name="record_log" value="$(arg record_log)"/>
     <arg name="log_dir" value="$(arg log_dir)"/>
     <arg name="bag_prefix" value="$(arg bag_prefix)"/>
