@@ -112,6 +112,7 @@
     <arg name="record_log" value="$(arg record_log)"/>
     <arg name="log_dir" value="$(arg log_dir)"/>
     <arg name="bag_prefix" value="$(arg bag_prefix)"/>
+    <arg name="local_occupancy_map" value="false"/>
   </include>
 
   <node if="$(arg rviz)"
