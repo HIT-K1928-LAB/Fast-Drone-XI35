@@ -1,0 +1,87 @@
+<launch>
+  <arg name="onnx_file" default="$(find yopo_planner)/model/yopo.onnx"/>
+  <arg name="engine_file" default="$(find yopo_planner)/model/yopo.engine"/>
+
+  <arg name="init_x" default="0.0"/>
+  <arg name="init_y" default="0.0"/>
+  <arg name="init_z" default="2.0"/>
+  <arg name="goal_x" default="50.0"/>
+  <arg name="goal_y" default="0.0"/>
+  <arg name="goal_z" default="2.0"/>
+
+  <arg name="map_size_x" default="30.0"/>
+  <arg name="map_size_y" default="20.0"/>
+  <arg name="map_size_z" default="3.0"/>
+  <arg name="map_resolution" default="0.1"/>
+  <arg name="obs_num" default="100"/>
+  <arg name="circle_num" default="100"/>
+  <arg name="sensing_horizon" default="20.0"/>
+  <arg name="sensing_rate" default="30.0"/>
+
+  <arg name="record_log" default="true"/>
+  <arg name="log_dir" default="$(find yopo_planner)/../../../log"/>
+  <arg name="bag_prefix" default="yopo_sim"/>
+  <arg name="rviz" default="false"/>
+
+  <node pkg="map_generator" name="random_forest" type="random_forest" output="screen">
+    <remap from="~odometry" to="/sim/odom"/>
+    <param name="map/x_size" value="$(arg map_size_x)"/>
+    <param name="map/y_size" value="$(arg map_size_y)"/>
+    <param name="map/z_size" value="$(arg map_size_z)"/>
+    <param name="map/resolution" value="$(arg map_resolution)"/>
+    <param name="ObstacleShape/seed" value="1"/>
+    <param name="map/obs_num" value="$(arg obs_num)"/>
+    <param name="ObstacleShape/lower_rad" value="0.5"/>
+    <param name="ObstacleShape/upper_rad" value="0.7"/>
+    <param name="ObstacleShape/lower_hei" value="0.0"/>
+    <param name="ObstacleShape/upper_hei" value="3.0"/>
+    <param name="map/circle_num" value="$(arg circle_num)"/>
+    <param name="ObstacleShape/radius_l" value="0.7"/>
+    <param name="ObstacleShape/radius_h" value="0.5"/>
+    <param name="ObstacleShape/z_l" value="0.7"/>
+    <param name="ObstacleShape/z_h" value="0.8"/>
+    <param name="ObstacleShape/theta" value="0.5"/>
+    <param name="sensing/radius" value="$(arg sensing_horizon)"/>
+    <param name="sensing/rate" value="10.0"/>
+    <param name="pub_rate" value="1.0"/>
+    <param name="min_distance" value="0.8"/>
+  </node>
+
+  <include file="$(find so3_quadrotor_simulator)/launch/simulator_position_control.launch">
+    <arg name="init_x" value="$(arg init_x)"/>
+    <arg name="init_y" value="$(arg init_y)"/>
+    <arg name="init_z" value="$(arg init_z)"/>
+  </include>
+
+  <node pkg="local_sensing_node" type="pcl_render_node" name="pcl_render_node" output="screen">
+    <rosparam command="load" file="$(find local_sensing_node)/params/camera.yaml"/>
+    <param name="sensing_horizon" value="$(arg sensing_horizon)"/>
+    <param name="sensing_rate" value="$(arg sensing_rate)"/>
+    <param name="estimation_rate" value="$(arg sensing_rate)"/>
+    <param name="map/x_size" value="$(arg map_size_x)"/>
+    <param name="map/y_size" value="$(arg map_size_y)"/>
+    <param name="map/z_size" value="$(arg map_size_z)"/>
+    <remap from="~global_map" to="/map_generator/global_cloud"/>
+    <remap from="~odometry" to="/sim/odom"/>
+  </node>
+
+  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
+    <arg name="onnx_file" value="$(arg onnx_file)"/>
+    <arg name="engine_file" value="$(arg engine_file)"/>
+    <arg name="odom_topic" value="/sim/odom"/>
+    <arg name="depth_topic" value="/pcl_render_node/depth"/>
+    <arg name="ctrl_topic" value="/so3_control/pos_cmd"/>
+    <arg name="goal_x" value="$(arg goal_x)"/>
+    <arg name="goal_y" value="$(arg goal_y)"/>
+    <arg name="goal_z" value="$(arg goal_z)"/>
+    <arg name="record_log" value="$(arg record_log)"/>
+    <arg name="log_dir" value="$(arg log_dir)"/>
+    <arg name="bag_prefix" value="$(arg bag_prefix)"/>
+  </include>
+
+  <node if="$(arg rviz)"
+        name="rviz"
+        pkg="rviz"
+        type="rviz"
+        args="-d $(find yopo_planner)/rviz/yopo_sim.rviz"/>
+</launch>
