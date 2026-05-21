@@ -114,8 +114,11 @@ class YopoPlannerNode {
     }
 
     void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
-        planner_->setGoal(Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, 2.0));
-        ROS_INFO("YOPO new goal: %.2f %.2f %.2f", msg->pose.position.x, msg->pose.position.y, 2.0);
+        planner_->setGoal(
+            Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z));
+        ROS_INFO(
+            "YOPO new goal: %.2f %.2f %.2f", msg->pose.position.x, msg->pose.position.y,
+            msg->pose.position.z);
     }
 
     void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
