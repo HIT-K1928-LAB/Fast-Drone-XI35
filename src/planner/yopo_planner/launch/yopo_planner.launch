@@ -33,7 +33,7 @@
   <node if="$(arg record_log)"
         name="yopo_log_recorder"
         pkg="yopo_planner"
-        type="record_yopo_log.sh"
+        type="record_yopo_log.py"
         output="screen"
         args="$(arg log_dir) $(arg bag_prefix) /yopo_log/log $(arg odom_topic) $(arg ctrl_topic)"/>
 </launch>
