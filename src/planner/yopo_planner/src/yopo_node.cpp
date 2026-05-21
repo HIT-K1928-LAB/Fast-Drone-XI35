@@ -1,6 +1,7 @@
 #include <Eigen/Core>
 #include <chrono>
 #include <geometry_msgs/PoseStamped.h>
+#include <limits>
 #include <memory>
 #include <nav_msgs/Odometry.h>
 #include <opencv2/imgproc.hpp>
@@ -8,6 +9,7 @@
 #ifdef YOPO_HAVE_OPENCV_PHOTO
 #include <opencv2/photo.hpp>
 #endif
+#include "yopo_planner/YopoLog.h"
 #include "yopo_planner/yopo_engine.h"
 #include "yopo_planner/yopo_planner.h"
 #include <quadrotor_msgs/PositionCommand.h>
@@ -71,6 +73,7 @@ class YopoPlannerNode {
         all_trajs_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/yopo_net/trajs_visual", 1);
         lattice_traj_pub_ =
             nh_.advertise<sensor_msgs::PointCloud2>("/yopo_net/lattice_trajs_visual", 1);
+        log_pub_ = nh_.advertise<yopo_planner::YopoLog>("/yopo_log/log", 10);
 
         odom_sub_ = nh_.subscribe(
             odom_topic, 1, &YopoPlannerNode::odomCallback, this,
@@ -133,13 +136,22 @@ class YopoPlannerNode {
         }
         const auto t3 = Clock::now();
 
+        float best_score   = std::numeric_limits<float>::max();
+        int best_action_id = 0;
+        for (int i = 0; i < static_cast<int>(score_pred.size()); ++i) {
+            if (score_pred[i] < best_score) {
+                best_score     = score_pred[i];
+                best_action_id = i;
+            }
+        }
+
         planner_->updateTrajectory(endstate_pred, score_pred, visualize_);
         const auto t4 = Clock::now();
 
         publishVisualization();
         const auto t5 = Clock::now();
 
-        printTiming(t0, t1, t2, t3, t4, t5);
+        printTiming(t0, t1, t2, t3, t4, t5, best_score, best_action_id);
     }
 
     bool prepareDepth(
@@ -322,14 +334,25 @@ class YopoPlannerNode {
 
     void printTiming(
         const Clock::time_point& t0, const Clock::time_point& t1, const Clock::time_point& t2,
-        const Clock::time_point& t3, const Clock::time_point& t4, const Clock::time_point& t5) {
+        const Clock::time_point& t3, const Clock::time_point& t4, const Clock::time_point& t5,
+        float best_score, int best_action_id) {
         ++count_;
-        time_interpolation_ += elapsedMs(t0, t1);
-        time_prepare_ += elapsedMs(t1, t2);
-        time_forward_ += elapsedMs(t2, t3);
-        time_process_ += elapsedMs(t3, t4);
-        time_visualize_ += elapsedMs(t4, t5);
+        const double depth_ms     = elapsedMs(t0, t1);
+        const double prepare_ms   = elapsedMs(t1, t2);
+        const double infer_ms     = elapsedMs(t2, t3);
+        const double post_ms      = elapsedMs(t3, t4);
+        const double visualize_ms = elapsedMs(t4, t5);
+        time_interpolation_ += depth_ms;
+        time_prepare_ += prepare_ms;
+        time_forward_ += infer_ms;
+        time_process_ += post_ms;
+        time_visualize_ += visualize_ms;
         const double total = elapsedMs(t0, t5);
+
+        publishLog(
+            depth_ms, prepare_ms, infer_ms, post_ms, visualize_ms, total, best_score,
+            best_action_id);
+
         if (total > 1000.0 / depth_fps_) {
             ROS_WARN("YOPO processing %.2f ms exceeds %.2f ms", total, 1000.0 / depth_fps_);
         }
@@ -341,6 +364,30 @@ class YopoPlannerNode {
         }
     }
 
+    void publishLog(
+        double depth_ms, double prepare_ms, double infer_ms, double post_ms, double visualize_ms,
+        double total_ms, float best_score, int best_action_id) {
+        if (log_pub_.getNumSubscribers() == 0) return;
+
+        yopo_planner::YopoLog msg;
+        msg.header.stamp     = ros::Time::now();
+        msg.header.frame_id  = "world";
+        msg.depth_ms         = static_cast<float>(depth_ms);
+        msg.prepare_ms       = static_cast<float>(prepare_ms);
+        msg.infer_ms         = static_cast<float>(infer_ms);
+        msg.post_ms          = static_cast<float>(post_ms);
+        msg.visualize_ms     = static_cast<float>(visualize_ms);
+        msg.total_ms         = static_cast<float>(total_ms);
+        msg.avg_depth_ms     = static_cast<float>(time_interpolation_ / count_);
+        msg.avg_prepare_ms   = static_cast<float>(time_prepare_ / count_);
+        msg.avg_infer_ms     = static_cast<float>(time_forward_ / count_);
+        msg.avg_post_ms      = static_cast<float>(time_process_ / count_);
+        msg.avg_visualize_ms = static_cast<float>(time_visualize_ / count_);
+        msg.best_score       = best_score;
+        msg.best_action_id   = best_action_id;
+        log_pub_.publish(msg);
+    }
+
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
     std::unique_ptr<YopoPlanner> planner_;
@@ -350,6 +397,7 @@ class YopoPlannerNode {
     ros::Publisher best_traj_pub_;
     ros::Publisher all_trajs_pub_;
     ros::Publisher lattice_traj_pub_;
+    ros::Publisher log_pub_;
     ros::Subscriber odom_sub_;
     ros::Subscriber depth_sub_;
     ros::Subscriber goal_sub_;

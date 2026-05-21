@@ -7,12 +7,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 find_package(catkin REQUIRED COMPONENTS
+  message_generation
   roscpp
   std_msgs
   sensor_msgs
   nav_msgs
   geometry_msgs
   quadrotor_msgs
+)
+
+add_message_files(
+  FILES
+  YopoLog.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
 )
 
 set(OpenCV_DIR /usr/local/opencv-4.5.4/lib/cmake/opencv4)
@@ -56,7 +67,7 @@ message(STATUS "TensorRT nvonnxparser: ${NVONNXPARSER_LIBRARY}")
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES yopo_planner_lib
-  CATKIN_DEPENDS roscpp std_msgs sensor_msgs nav_msgs geometry_msgs quadrotor_msgs
+  CATKIN_DEPENDS message_runtime roscpp std_msgs sensor_msgs nav_msgs geometry_msgs quadrotor_msgs
 )
 
 include_directories(
@@ -72,7 +83,7 @@ add_library(yopo_planner_lib
   src/yopo_engine.cpp
   src/yopo_planner.cpp
 )
-add_dependencies(yopo_planner_lib ${catkin_EXPORTED_TARGETS})
+add_dependencies(yopo_planner_lib ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(yopo_planner_lib
   ${catkin_LIBRARIES}
@@ -90,8 +101,10 @@ target_link_libraries(yopo_planner_node
   yopo_planner_lib
   ${catkin_LIBRARIES}
 )
-add_dependencies(yopo_planner_node ${catkin_EXPORTED_TARGETS})
+add_dependencies(yopo_planner_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-catkin_install_python(PROGRAMS scripts/export_yopo_onnx.py
+catkin_install_python(PROGRAMS
+  scripts/export_yopo_onnx.py
+  scripts/record_yopo_log.sh
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

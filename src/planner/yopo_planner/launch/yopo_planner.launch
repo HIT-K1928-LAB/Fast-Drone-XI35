@@ -11,6 +11,9 @@
   <arg name="goal_x" default="50.0"/>
   <arg name="goal_y" default="0.0"/>
   <arg name="goal_z" default="2.0"/>
+  <arg name="record_log" default="true"/>
+  <arg name="log_dir" default="$(find yopo_planner)/../../../log"/>
+  <arg name="bag_prefix" default="yopo_log"/>
 
   <node name="yopo_planner_node" pkg="yopo_planner" type="yopo_planner_node" output="screen">
     <param name="onnx_file" value="$(arg onnx_file)"/>
@@ -26,4 +29,11 @@
     <param name="goal_y" value="$(arg goal_y)"/>
     <param name="goal_z" value="$(arg goal_z)"/>
   </node>
+
+  <node if="$(arg record_log)"
+        name="yopo_log_recorder"
+        pkg="yopo_planner"
+        type="record_yopo_log.sh"
+        output="screen"
+        args="$(arg log_dir) $(arg bag_prefix) /yopo_log/log $(arg odom_topic) $(arg ctrl_topic)"/>
 </launch>
