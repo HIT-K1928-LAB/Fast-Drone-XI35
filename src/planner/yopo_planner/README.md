@@ -30,3 +30,5 @@
 用途：所有网络候选轨迹可视化
 
 
+source devel/setup.bash
+roslaunch yopo_planner yopo_planner.launch

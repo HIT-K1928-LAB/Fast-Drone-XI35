@@ -24,6 +24,7 @@ class YopoPlannerNode {
   public:
     YopoPlannerNode() : nh_(), pnh_("~") {
         YopoParams params;
+        // param_name param_variable default_value
         pnh_.param("pitch_angle_deg", params.pitch_angle_deg, params.pitch_angle_deg);
         pnh_.param("plan_from_reference", params.plan_from_reference, params.plan_from_reference);
         pnh_.param("velocity", params.velocity, params.velocity);
