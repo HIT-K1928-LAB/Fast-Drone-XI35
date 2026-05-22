@@ -13,18 +13,15 @@
 // #include "ThrustCurve.h"
 #include "controller.h"
 
-struct AutoTakeoffLand_t {
+struct TakeoffLandContext {
     bool landed{true};
-    ros::Time toggle_takeoff_land_time;
-    std::pair<bool, ros::Time> delay_trigger{std::pair<bool, ros::Time>(false, ros::Time(0))};
+    ros::Time command_time;
+    std::pair<bool, ros::Time> delayed_trigger{false, ros::Time(0)};
     Eigen::Vector4d start_pose;
 
-    static constexpr double MOTORS_SPEEDUP_TIME =
-        3.0;  // motors idle running for 3 seconds before takeoff
-    static constexpr double TAKEOFF_SPEEDUP_TIME =
-        0.1;  // Time to speed up during takeoff font stage
-    static constexpr double DELAY_TRIGGER_TIME =
-        2.0;  // Time to be delayed when reach at target height
+    static constexpr double MOTORS_SPEEDUP_TIME  = 3.0;
+    static constexpr double TAKEOFF_SPEEDUP_TIME = 0.1;
+    static constexpr double DELAY_TRIGGER_TIME   = 2.0;
 };
 
 class PX4CtrlFSM {
@@ -70,8 +67,9 @@ class PX4CtrlFSM {
     };
 
     PX4CtrlFSM(Parameter_t &, LinearControl &);
+
     void process();
-    void process_new();
+
     bool rc_is_received(const ros::Time &now_time);
     bool cmd_is_received(const ros::Time &now_time);
     bool odom_is_received(const ros::Time &now_time);
@@ -79,7 +77,7 @@ class PX4CtrlFSM {
     bool bat_is_received(const ros::Time &now_time);
     bool recv_new_odom();
     State_t get_state() { return state; }
-    bool get_landed() { return takeoff_land.landed; }
+    bool get_landed() { return takeoff_land_ctx.landed; }
 
     void LPF_imu_a(Eigen::Vector3d &imu_data_acc);
 
@@ -100,7 +98,16 @@ class PX4CtrlFSM {
 
   private:
     State_t state;  // Should only be changed in PX4CtrlFSM::process() function!
-    AutoTakeoffLand_t takeoff_land;
+    TakeoffLandContext takeoff_land_ctx;  //FSM 内部自动起降上下文
+    Takeoff_Land_Data_t takeoff_land_data;  //外部收到的起飞/降落命令
+
+    // ---- state handlers ----
+    void handleManualCtrl(const ros::Time &now_time, Desired_State_t &des);
+    void handleAutoHover(const ros::Time &now_time, Desired_State_t &des);
+    void handleCmdCtrl(const ros::Time &now_time, Desired_State_t &des);
+    void handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &des);
+    void handleAutoLand(
+        const ros::Time &now_time, Desired_State_t &des, bool &rotor_low_speed_during_land);
 
     // ---- control related ----
     Desired_State_t get_hover_des();
@@ -126,6 +133,8 @@ class PX4CtrlFSM {
     void publish_bodyrate_ctrl(const Controller_Output_t &u, const ros::Time &stamp);
     void publish_attitude_ctrl(const Controller_Output_t &u, const ros::Time &stamp);
     void publish_trigger(const nav_msgs::Odometry &odom_msg);
+
+    // refactor
 };
 
 #endif

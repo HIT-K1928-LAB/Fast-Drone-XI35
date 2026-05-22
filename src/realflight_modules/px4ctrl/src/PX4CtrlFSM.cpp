@@ -148,7 +148,7 @@ void PX4CtrlFSM::process() {
                 if (param.takeoff_land.enable_auto_arm) {
                     toggle_arm_disarm(true);
                 }
-                takeoff_land.toggle_takeoff_land_time = now_time;
+                takeoff_land_ctx.command_time = now_time;
 
                 ROS_INFO("\033[32m[px4ctrl] MANUAL_CTRL(L1) --> AUTO_TAKEOFF\033[32m");
             }
@@ -183,7 +183,7 @@ void PX4CtrlFSM::process() {
             } else if (
                 (takeoff_land_data.triggered &&
                  takeoff_land_data.takeoff_land_cmd == quadrotor_msgs::TakeoffLand::LAND) ||
-                emergency_hover) {  //加上进入紧急状态直接land
+                emergency_hover) {  // 加上进入紧急状态直接land
 
                 state = AUTO_LAND;
                 set_start_pose_for_takeoff_land(odom_data);
@@ -196,9 +196,9 @@ void PX4CtrlFSM::process() {
                 set_hov_with_rc();
                 des = get_hover_des();
                 if ((rc_data.enter_command_mode) ||
-                    (takeoff_land.delay_trigger.first &&
-                     now_time > takeoff_land.delay_trigger.second)) {
-                    takeoff_land.delay_trigger.first = false;
+                    (takeoff_land_ctx.delayed_trigger.first &&
+                     now_time > takeoff_land_ctx.delayed_trigger.second)) {
+                    takeoff_land_ctx.delayed_trigger.first = false;
                     publish_trigger(odom_data.msg);
                     ROS_INFO("\033[32m[px4ctrl] TRIGGER sent, allow user command.\033[32m");
                 }
@@ -241,12 +241,13 @@ void PX4CtrlFSM::process() {
         }
 
         case AUTO_TAKEOFF: {
-            if ((now_time - takeoff_land.toggle_takeoff_land_time).toSec() <
-                AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME)  // Wait for several seconds to warn prople.
+            if ((now_time - takeoff_land_ctx.command_time).toSec() <
+                TakeoffLandContext::MOTORS_SPEEDUP_TIME)  // Wait for several seconds to warn
+                                                          // prople.
             {
                 des = get_rotor_speed_up_des(now_time);
             } else if (
-                odom_data.p(2) >= (takeoff_land.start_pose(2) +
+                odom_data.p(2) >= (takeoff_land_ctx.start_pose(2) +
                                    param.takeoff_land.height))  // reach the desired height
             {
                 state = AUTO_HOVER;
@@ -254,12 +255,12 @@ void PX4CtrlFSM::process() {
                 ROS_INFO("\033[32m[px4ctrl] AUTO_TAKEOFF --> AUTO_HOVER(L2)\033[32m");
 
                 ROS_INFO("odom_data.p(2): %f", odom_data.p(2));
-                ROS_INFO("takeoff_land.start_pose(2): %f", takeoff_land.start_pose(2));
+                ROS_INFO("takeoff_land_ctx.start_pose(2): %f", takeoff_land_ctx.start_pose(2));
                 ROS_INFO("takeoff_height: %f", param.takeoff_land.height);
 
-                takeoff_land.delay_trigger.first = true;
-                takeoff_land.delay_trigger.second =
-                    now_time + ros::Duration(AutoTakeoffLand_t::DELAY_TRIGGER_TIME);
+                takeoff_land_ctx.delayed_trigger.first = true;
+                takeoff_land_ctx.delayed_trigger.second =
+                    now_time + ros::Duration(TakeoffLandContext::DELAY_TRIGGER_TIME);
             } else {
                 des = get_takeoff_land_des(param.takeoff_land.speed);
             }
@@ -322,9 +323,9 @@ void PX4CtrlFSM::process() {
 
     // STEP2: estimate thrust model
     if (state == AUTO_TAKEOFF) {
-        ros::Time now  = ros::Time::now();
-        double delta_t = (now - takeoff_land.toggle_takeoff_land_time).toSec() -
-                         AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME;
+        ros::Time now = ros::Time::now();
+        double delta_t =
+            (now - takeoff_land_ctx.command_time).toSec() - TakeoffLandContext::MOTORS_SPEEDUP_TIME;
         if (delta_t > 0.2) controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
     }
 
@@ -355,7 +356,7 @@ void PX4CtrlFSM::process() {
 
     // STEP5: Detect if the drone has landed
     land_detector(state, des, odom_data);
-    // cout << takeoff_land.landed << " ";
+    // cout << takeoff_land_ctx.landed << " ";
     // fflush(stdout);
 
     // STEP6: Clear flags beyound their lifetime
@@ -376,12 +377,12 @@ void PX4CtrlFSM::land_detector(
     static State_t last_state = State_t::MANUAL_CTRL;
     if (last_state == State_t::MANUAL_CTRL &&
         (state == State_t::AUTO_HOVER || state == State_t::AUTO_TAKEOFF)) {
-        takeoff_land.landed = false;  // Always holds
+        takeoff_land_ctx.landed = false;  // Always holds
     }
     last_state = state;
 
     if (state == State_t::MANUAL_CTRL && !state_data.current_state.armed) {
-        takeoff_land.landed = true;
+        takeoff_land_ctx.landed = true;
         return;  // No need of other decisions
     }
 
@@ -393,7 +394,7 @@ void PX4CtrlFSM::land_detector(
 
     static ros::Time time_C12_reached;  // time_Constraints12_reached
     static bool is_last_C12_satisfy;
-    if (takeoff_land.landed) {
+    if (takeoff_land_ctx.landed) {
         time_C12_reached    = ros::Time::now();
         is_last_C12_satisfy = false;
     } else {
@@ -405,7 +406,7 @@ void PX4CtrlFSM::land_detector(
             if ((ros::Time::now() - time_C12_reached).toSec() >
                 TIME_KEEP_C)  // Constraint 3 reached
             {
-                takeoff_land.landed = true;
+                takeoff_land_ctx.landed = true;
             }
         }
 
@@ -438,8 +439,8 @@ Desired_State_t PX4CtrlFSM::get_cmd_des() {
 }
 
 Desired_State_t PX4CtrlFSM::get_rotor_speed_up_des(const ros::Time now) {
-    double delta_t = (now - takeoff_land.toggle_takeoff_land_time).toSec();
-    double des_a_z = exp((delta_t - AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME) * 6.0) * 7.0 -
+    double delta_t = (now - takeoff_land_ctx.command_time).toSec();
+    double des_a_z = exp((delta_t - TakeoffLandContext::MOTORS_SPEEDUP_TIME) * 6.0) * 7.0 -
                      7.0;  // Parameters 6.0 and 7.0 are just heuristic values which result in a
                            // saticfactory curve.
     if (des_a_z > 0.1) {
@@ -448,11 +449,11 @@ Desired_State_t PX4CtrlFSM::get_rotor_speed_up_des(const ros::Time now) {
     }
 
     Desired_State_t des;
-    des.p        = takeoff_land.start_pose.head<3>();
+    des.p        = takeoff_land_ctx.start_pose.head<3>();
     des.v        = Eigen::Vector3d::Zero();
     des.a        = Eigen::Vector3d(0, 0, des_a_z);
     des.j        = Eigen::Vector3d::Zero();
-    des.yaw      = takeoff_land.start_pose(3);
+    des.yaw      = takeoff_land_ctx.start_pose(3);
     des.yaw_rate = 0.0;
 
     return des;
@@ -461,26 +462,26 @@ Desired_State_t PX4CtrlFSM::get_rotor_speed_up_des(const ros::Time now) {
 Desired_State_t PX4CtrlFSM::get_takeoff_land_des(const double speed) {
     ros::Time now = ros::Time::now();
     double delta_t =
-        (now - takeoff_land.toggle_takeoff_land_time).toSec() -
-        (speed > 0 ? AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME : 0);  // speed > 0 means takeoff
+        (now - takeoff_land_ctx.command_time).toSec() -
+        (speed > 0 ? TakeoffLandContext::MOTORS_SPEEDUP_TIME : 0);  // speed > 0 means takeoff
     // takeoff_land.last_set_cmd_time = now;
 
-    // takeoff_land.start_pose(2) += speed * delta_t;
+    // takeoff_land_ctx.start_pose(2) += speed * delta_t;
 
     Desired_State_t des;
-    des.p = takeoff_land.start_pose.head<3>() + Eigen::Vector3d(0, 0, speed * delta_t);
+    des.p = takeoff_land_ctx.start_pose.head<3>() + Eigen::Vector3d(0, 0, speed * delta_t);
     des.v = Eigen::Vector3d(0, 0, speed);
     if (speed > 0) {
         double des_a_z =
-            (delta_t < AutoTakeoffLand_t::TAKEOFF_SPEEDUP_TIME)
-                ? (0.01 * 9.81 * sin(M_PI / AutoTakeoffLand_t::TAKEOFF_SPEEDUP_TIME * delta_t))
+            (delta_t < TakeoffLandContext::TAKEOFF_SPEEDUP_TIME)
+                ? (0.01 * 9.81 * sin(M_PI / TakeoffLandContext::TAKEOFF_SPEEDUP_TIME * delta_t))
                 : 0;
         des.a = Eigen::Vector3d(0, 0, des_a_z);
     } else {
         des.a = Eigen::Vector3d::Zero();
     }
     des.j        = Eigen::Vector3d::Zero();
-    des.yaw      = takeoff_land.start_pose(3);
+    des.yaw      = takeoff_land_ctx.start_pose(3);
     des.yaw_rate = 0.0;
 
     return des;
@@ -523,10 +524,10 @@ void PX4CtrlFSM::set_hov_with_rc() {
 }
 
 void PX4CtrlFSM::set_start_pose_for_takeoff_land(const Odom_Data_t &odom) {
-    takeoff_land.start_pose.head<3>() = odom_data.p;
-    takeoff_land.start_pose(3)        = get_yaw_from_quaternion(odom_data.q);
+    takeoff_land_ctx.start_pose.head<3>() = odom_data.p;
+    takeoff_land_ctx.start_pose(3)        = get_yaw_from_quaternion(odom_data.q);
 
-    takeoff_land.toggle_takeoff_land_time = ros::Time::now();
+    takeoff_land_ctx.command_time = ros::Time::now();
 }
 
 bool PX4CtrlFSM::rc_is_received(const ros::Time &now_time) {
