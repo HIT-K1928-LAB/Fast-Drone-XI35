@@ -35,7 +35,7 @@ class PX4CtrlFSM {
     Imu_Data_t imu_data;
     Command_Data_t cmd_data;
     Battery_Data_t bat_data;
-    Takeoff_Land_Data_t takeoff_land_data;
+    Takeoff_Land_Data_t takeoff_land_data;  // 外部收到的起飞/降落命令
 
     Eigen::Vector3d imu_acc_lpf;  // output of LPF
     bool flag_init_imu_acc_lpf;
@@ -70,14 +70,14 @@ class PX4CtrlFSM {
 
     void process();
 
-    bool rc_is_received(const ros::Time &now_time);
-    bool cmd_is_received(const ros::Time &now_time);
-    bool odom_is_received(const ros::Time &now_time);
-    bool imu_is_received(const ros::Time &now_time);
-    bool bat_is_received(const ros::Time &now_time);
+    bool rc_is_received(const ros::Time &now_time) const;
+    bool cmd_is_received(const ros::Time &now_time) const;
+    bool odom_is_received(const ros::Time &now_time) const;
+    bool imu_is_received(const ros::Time &now_time) const;
+    bool bat_is_received(const ros::Time &now_time) const;
     bool recv_new_odom();
     State_t get_state() { return state; }
-    bool get_landed() { return takeoff_land_ctx.landed; }
+    bool get_landed() const { return takeoff_land_ctx.landed; }
 
     void LPF_imu_a(Eigen::Vector3d &imu_data_acc);
 
@@ -97,9 +97,9 @@ class PX4CtrlFSM {
     }
 
   private:
+    // refactor begin
     State_t state;  // Should only be changed in PX4CtrlFSM::process() function!
-    TakeoffLandContext takeoff_land_ctx;  //FSM 内部自动起降上下文
-    Takeoff_Land_Data_t takeoff_land_data;  //外部收到的起飞/降落命令
+    TakeoffLandContext takeoff_land_ctx;  // FSM 内部自动起降上下文
 
     // ---- state handlers ----
     void handleManualCtrl(const ros::Time &now_time, Desired_State_t &des);
@@ -108,6 +108,36 @@ class PX4CtrlFSM {
     void handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &des);
     void handleAutoLand(
         const ros::Time &now_time, Desired_State_t &des, bool &rotor_low_speed_during_land);
+
+    // ---- event predicates ----
+    bool takeoffRequested() const;
+    bool landRequested() const;
+    bool hoverSwitchTriggered() const;
+    bool commandSwitchEnabled() const;
+    bool commandSwitchTriggered() const;
+
+    // ---- guards ----
+    bool canEnterAutoHover(const ros::Time &now_time) const;
+    bool canEnterAutoTakeoff(const ros::Time &now_time) const;
+    bool canEnterCmdCtrl(const ros::Time &now_time) const;
+
+    // ---- transition attempts ----
+    bool tryEnterAutoTakeoff(const ros::Time &now_time);
+    bool tryEnterAutoHover(const ros::Time &now_time);
+    bool tryEnterCmdCtrl(const ros::Time &now_time, Desired_State_t &des);
+    bool tryEnterAutoLand(const ros::Time &now_time);
+    bool tryFallbackToManual(const ros::Time &now_time);
+    bool tryFallbackCmdToHover(const ros::Time &now_time, Desired_State_t &des);
+    bool tryRebootFcu();
+
+    // ---- transition actions ----
+    void enterManualFromOffboard();
+    void enterAutoHover();
+    void enterAutoTakeoff(const ros::Time &now_time);
+    void enterCmdCtrl(Desired_State_t &des);
+    void enterAutoLand();
+
+    // refactor end
 
     // ---- control related ----
     Desired_State_t get_hover_des();
@@ -133,8 +163,6 @@ class PX4CtrlFSM {
     void publish_bodyrate_ctrl(const Controller_Output_t &u, const ros::Time &stamp);
     void publish_attitude_ctrl(const Controller_Output_t &u, const ros::Time &stamp);
     void publish_trigger(const nav_msgs::Odometry &odom_msg);
-
-    // refactor
 };
 
 #endif
