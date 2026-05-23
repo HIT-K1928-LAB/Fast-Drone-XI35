@@ -120,6 +120,8 @@ class PX4CtrlFSM {
     bool canEnterAutoHover(const ros::Time &now_time) const;
     bool canEnterAutoTakeoff(const ros::Time &now_time) const;
     bool canEnterCmdCtrl(const ros::Time &now_time) const;
+    bool isOnGroundForTakeoff() const;
+    bool canAutoTakeoffFromHover() const;
 
     // ---- transition attempts ----
     bool tryEnterAutoTakeoff(const ros::Time &now_time);
@@ -131,9 +133,9 @@ class PX4CtrlFSM {
     bool tryRebootFcu();
 
     // ---- transition actions ----
-    void enterManualFromOffboard();
-    void enterAutoHover();
-    void enterAutoTakeoff(const ros::Time &now_time);
+    bool enterManualFromOffboard();
+    bool enterAutoHover();
+    bool enterAutoTakeoff(const ros::Time &now_time);
     void enterCmdCtrl(Desired_State_t &des);
     void enterAutoLand();
 

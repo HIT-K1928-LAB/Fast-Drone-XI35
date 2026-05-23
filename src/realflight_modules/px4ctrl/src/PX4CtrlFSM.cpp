@@ -17,26 +17,28 @@ PX4CtrlFSM::PX4CtrlFSM(Parameter_t &param_, LinearControl &controller_)
 /*
         Finite State Machine
 
-          system start
-                |
-                |
-                v
-    ----- > MANUAL_CTRL <-----------------
-    |         ^   |    \                 |
-    |         |   |     \                |
-    |         |   |      > AUTO_TAKEOFF  |
-    |         |   |        /             |
-    |         |   |       /              |
-    |         |   |      /               |
-    |         |   v     /                |
-    |       AUTO_HOVER <                 |
-    |         ^   |  \  \                |
-    |         |   |   \  \               |
-    |         |	  |    > AUTO_LAND -------
-    |         |   |
-    |         |   v
-    -------- CMD_CTRL
+              system start
+                    |
+                    v
+              MANUAL_CTRL
+              /    |    ^
+             /     |    |
+     TAKEOFF     HOVER  | exit offboard / unsafe
+           /       |    |
+          v        v    |
+    AUTO_TAKEOFF -> AUTO_HOVER <-> CMD_CTRL
+          ^          |   ^
+          |          |   |
+          +----------+   |
+       ground TAKEOFF    |
+                     \   |
+                      v  |
+                    AUTO_LAND
 
+        Notes:
+        - AUTO_HOVER can still be an on-ground offboard state before takeoff.
+        - AUTO_HOVER accepts TAKEOFF only when the vehicle is considered on ground.
+        - AUTO_TAKEOFF reuses an existing OFFBOARD session when entered from AUTO_HOVER.
 */
 
 // ---- state handlers ----
@@ -52,6 +54,9 @@ void PX4CtrlFSM::handleManualCtrl(const ros::Time &now_time, Desired_State_t &de
 
 void PX4CtrlFSM::handleAutoHover(const ros::Time &now_time, Desired_State_t &des) {
     if (tryFallbackToManual(now_time)) return;
+    if (canAutoTakeoffFromHover()) {
+        if (tryEnterAutoTakeoff(now_time)) return;
+    }
     if (tryEnterAutoLand(now_time)) return;
     if (tryEnterCmdCtrl(now_time, des)) return;
 
@@ -62,7 +67,7 @@ void PX4CtrlFSM::handleAutoHover(const ros::Time &now_time, Desired_State_t &des
                                      now_time > takeoff_land_ctx.delayed_trigger.second)) {
         takeoff_land_ctx.delayed_trigger.first = false;
         publish_trigger(odom_data.msg);
-        ROS_INFO("\033[32m[px4ctrl] TRIGGER sent, allow user command.\033[32m");
+        ROS_INFO("\033[32m[px4ctrl] TRIGGER sent, allow planner command.\033[32m");
     }
 }
 
@@ -82,6 +87,8 @@ void PX4CtrlFSM::handleCmdCtrl(const ros::Time &now_time, Desired_State_t &des) 
 }
 
 void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &des) {
+    if (tryFallbackToManual(now_time)) return;
+
     if ((now_time - takeoff_land_ctx.command_time).toSec() <
         TakeoffLandContext::MOTORS_SPEEDUP_TIME) {
         des = get_rotor_speed_up_des(now_time);
@@ -208,9 +215,8 @@ bool PX4CtrlFSM::canEnterAutoTakeoff(const ros::Time &now_time) const {
         return false;
     }
 
-    if (!get_landed()) {
-        ROS_ERROR(
-            "[px4ctrl] Reject AUTO_TAKEOFF. land detector says that the drone is not landed now!");
+    if (!get_landed() && !isOnGroundForTakeoff()) {
+        ROS_ERROR("[px4ctrl] Reject AUTO_TAKEOFF. Drone is not on ground.");
         return false;
     }
 
@@ -236,13 +242,21 @@ bool PX4CtrlFSM::canEnterCmdCtrl(const ros::Time &now_time) const {
            !search_hover && state_data.current_state.mode == "OFFBOARD";
 }
 
+bool PX4CtrlFSM::isOnGroundForTakeoff() const {
+    return extended_state_data.current_extended_state.landed_state ==
+           mavros_msgs::ExtendedState::LANDED_STATE_ON_GROUND;
+}
+
+bool PX4CtrlFSM::canAutoTakeoffFromHover() const {
+    return state == AUTO_HOVER &&
+           (isOnGroundForTakeoff() || !state_data.current_state.armed || get_landed());
+}
+
 // ---- transition attempts ----
 bool PX4CtrlFSM::tryEnterAutoTakeoff(const ros::Time &now_time) {
     if (!takeoffRequested()) return false;
 
-    if (!canEnterAutoTakeoff(now_time)) {
-        return true;
-    }
+    if (!canEnterAutoTakeoff(now_time)) return true;
 
     enterAutoTakeoff(now_time);
     return true;
@@ -265,6 +279,7 @@ bool PX4CtrlFSM::tryEnterCmdCtrl(const ros::Time &now_time, Desired_State_t &des
     enterCmdCtrl(des);
     return true;
 }
+
 bool PX4CtrlFSM::tryEnterAutoLand(const ros::Time &now_time) {
     if (!(landRequested() || emergency_hover)) return false;
 
@@ -274,13 +289,19 @@ bool PX4CtrlFSM::tryEnterAutoLand(const ros::Time &now_time) {
     }
     return true;
 }
+
 bool PX4CtrlFSM::tryFallbackToManual(const ros::Time &now_time) {
-    if (rc_data.is_hover_mode && odom_is_received(now_time) && !kf_fusion_fail) {
+    const bool rc_ok = param.takeoff_land.no_RC || rc_is_received(now_time);
+    if (rc_ok && rc_data.is_hover_mode && odom_is_received(now_time) && !kf_fusion_fail) {
         return false;
     }
 
     const State_t old_state = state;
-    enterManualFromOffboard();
+    if (!enterManualFromOffboard()) {
+        state = old_state;
+        ROS_ERROR_THROTTLE(1.0, "[px4ctrl] Failed to exit OFFBOARD, keep current FSM state!");
+        return true;
+    }
 
     if (old_state == AUTO_HOVER) {
         ROS_WARN("[px4ctrl] AUTO_HOVER(L2) --> MANUAL_CTRL(L1)");
@@ -288,10 +309,13 @@ bool PX4CtrlFSM::tryFallbackToManual(const ros::Time &now_time) {
         ROS_WARN("[px4ctrl] From CMD_CTRL(L3) to MANUAL_CTRL(L1)!");
     } else if (old_state == AUTO_LAND) {
         ROS_WARN("[px4ctrl] From AUTO_LAND to MANUAL_CTRL(L1)!");
+    } else if (old_state == AUTO_TAKEOFF) {
+        ROS_WARN("[px4ctrl] AUTO_TAKEOFF --> MANUAL_CTRL(L1)");
     }
 
     return true;
 }
+
 bool PX4CtrlFSM::tryFallbackCmdToHover(const ros::Time &now_time, Desired_State_t &des) {
     if (commandSwitchEnabled() && cmd_is_received(now_time) && !emergency_hover && !search_hover) {
         return false;
@@ -307,6 +331,7 @@ bool PX4CtrlFSM::tryFallbackCmdToHover(const ros::Time &now_time, Desired_State_
 
     return true;
 }
+
 bool PX4CtrlFSM::tryRebootFcu() {
     if (!rc_data.toggle_reboot) return false;
 
@@ -320,44 +345,64 @@ bool PX4CtrlFSM::tryRebootFcu() {
 }
 
 // ---- transition actions ----
-void PX4CtrlFSM::enterManualFromOffboard() {
+bool PX4CtrlFSM::enterManualFromOffboard() {
+    if (state_data.current_state.mode == "OFFBOARD") {
+        if (!toggle_offboard_mode(false)) {
+            return false;
+        }
+    }
+
     state = MANUAL_CTRL;
-    toggle_offboard_mode(false);
+    return true;
 }
-void PX4CtrlFSM::enterAutoHover() {
-    state = AUTO_HOVER;
+
+bool PX4CtrlFSM::enterAutoHover() {
     controller.resetThrustMapping(bat_data);
     set_hov_with_odom();
-    toggle_offboard_mode(true);
 
+    if (!toggle_offboard_mode(true)) {
+        state = MANUAL_CTRL;
+        return false;
+    }
+
+    state = AUTO_HOVER;
     ROS_INFO("\033[32m[px4ctrl] MANUAL_CTRL(L1) --> AUTO_HOVER(L2)\033[32m");
+    return true;
 }
 
-void PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
-    state = AUTO_TAKEOFF;
-
+bool PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
     controller.resetThrustMapping(bat_data);
-
     set_start_pose_for_takeoff_land(odom_data);
-    toggle_offboard_mode(true);
+
+    if (state_data.current_state.mode != "OFFBOARD") {
+        if (!toggle_offboard_mode(true)) {
+            state = MANUAL_CTRL;
+            return false;
+        }
+    }
+
+    state = AUTO_TAKEOFF;
 
     ros::Duration(0.1).sleep();
     ros::spinOnce();
 
-    if (param.takeoff_land.enable_auto_arm) {
-        toggle_arm_disarm(true);
+    if (param.takeoff_land.enable_auto_arm && !toggle_arm_disarm(true)) {
+        enterManualFromOffboard();
+        return false;
     }
 
     takeoff_land_ctx.command_time = now_time;
-
     ROS_INFO("\033[32m[px4ctrl] MANUAL_CTRL(L1) --> AUTO_TAKEOFF\033[32m");
+    return true;
 }
+
 void PX4CtrlFSM::enterCmdCtrl(Desired_State_t &des) {
     state = CMD_CTRL;
     des   = get_cmd_des();
 
     ROS_INFO("\033[32m[px4ctrl] AUTO_HOVER(L2) --> CMD_CTRL(L3)\033[32m");
 }
+
 void PX4CtrlFSM::enterAutoLand() {
     state = AUTO_LAND;
     set_start_pose_for_takeoff_land(odom_data);
