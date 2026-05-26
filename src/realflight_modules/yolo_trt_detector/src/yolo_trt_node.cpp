@@ -26,10 +26,12 @@
 
 namespace
 {
-
+//nvinfer1是NVIDIA TensorRT的核心命名空间，包含了TensorRT的所有主要类和函数。
+//ILogger是TensorRT提供的一个接口类，用于处理日志消息。定义“合同模板”
+//TrtLogger是一个自定义的日志处理类，继承（public）自nvinfer1::ILogger。“合同”的具体实现
 class TrtLogger : public nvinfer1::ILogger
 {
-public:
+public://public\protcted\private
   void log(Severity severity, const char* msg) noexcept override
   {
     if (severity <= Severity::kWARNING)
@@ -119,7 +121,7 @@ public:
   YoloTrtNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh), it_(nh_)
   {
-    pnh_.param<std::string>("engine_file", engine_file_, "code/best.engine");
+    pnh_.param<std::string>("engine_file", engine_file_, "models/best_yolo11s_p2.engine");
     pnh_.param<std::string>("image_topic", image_topic_, "/camera/infra1/image_rect_raw");
     pnh_.param<std::string>("depth_topic", depth_topic_, "/camera/depth/image_rect_raw");
     pnh_.param<std::string>("camera_info_topic", camera_info_topic_, "/camera/infra1/camera_info");

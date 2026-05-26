@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export an Ultralytics YOLO .pt model to ONNX.")
-    parser.add_argument("--weights", default="code/best.pt", help="Path to the .pt weights file.")
+    parser.add_argument("--weights", default="models/best_yolo11s_p2.pt", help="Path to the .pt weights file.")
     parser.add_argument("--imgsz", type=int, default=640, help="Square input image size used for export.")
     parser.add_argument("--opset", type=int, default=None, help="Optional ONNX opset version.")
     parser.add_argument("--dynamic", action="store_true", help="Export with dynamic input shapes.")
