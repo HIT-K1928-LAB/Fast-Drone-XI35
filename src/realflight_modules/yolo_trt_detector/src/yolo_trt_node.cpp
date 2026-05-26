@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -9,10 +11,17 @@
 #include <cuda_runtime_api.h>
 
 #include <cv_bridge/cv_bridge.h>
+#include <geometry_msgs/PointStamped.h>
 #include <image_transport/image_transport.h>
+#include <nav_msgs/Odometry.h>
 #include <opencv2/opencv.hpp>
 #include <ros/ros.h>
+#include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Vector3.h>
 #include <visualization_msgs/MarkerArray.h>
 
 namespace
@@ -111,19 +120,45 @@ public:
     : nh_(nh), pnh_(pnh), it_(nh_)
   {
     pnh_.param<std::string>("engine_file", engine_file_, "code/best.engine");
-    pnh_.param<std::string>("image_topic", image_topic_, "/camera/image_raw");
-    pnh_.param<std::string>("frame_id", frame_id_, "camera");
+    pnh_.param<std::string>("image_topic", image_topic_, "/camera/infra1/image_rect_raw");
+    pnh_.param<std::string>("depth_topic", depth_topic_, "/camera/depth/image_rect_raw");
+    pnh_.param<std::string>("camera_info_topic", camera_info_topic_, "/camera/infra1/camera_info");
+    pnh_.param<std::string>("odom_topic", odom_topic_, "/kf_fusion/kf_imu_odom");
+    pnh_.param<std::string>("extrinsic_topic", extrinsic_topic_, "/vins_fusion/extrinsic");
+    pnh_.param<std::string>("target_topic", target_topic_, "yolo_trt/target_point");
+    pnh_.param<std::string>("frame_id", frame_id_, "");
+    pnh_.param<std::string>("global_frame_id", global_frame_id_, "world");
     pnh_.param<float>("conf_threshold", conf_threshold_, 0.25f);
     pnh_.param<float>("nms_threshold", nms_threshold_, 0.45f);
+    pnh_.param<float>("depth_scale", depth_scale_, 0.001f);
+    pnh_.param<int>("depth_roi_radius", depth_roi_radius_, 3);
+    pnh_.param<bool>("use_vins_extrinsic", use_vins_extrinsic_, true);
+    pnh_.param<double>("camera_tx", camera_tx_, 0.0);
+    pnh_.param<double>("camera_ty", camera_ty_, 0.0);
+    pnh_.param<double>("camera_tz", camera_tz_, 0.0);
+    pnh_.param<double>("camera_roll", camera_roll_, 0.0);
+    pnh_.param<double>("camera_pitch", camera_pitch_, 0.0);
+    pnh_.param<double>("camera_yaw", camera_yaw_, 0.0);
     pnh_.param<int>("detect_hz", detect_hz_, 30);
 
     loadEngine();
 
     image_sub_ = it_.subscribe(image_topic_, 1, &YoloTrtNode::imageCallback, this);
+    depth_sub_ = nh_.subscribe(depth_topic_, 1, &YoloTrtNode::depthCallback, this);
+    camera_info_sub_ = nh_.subscribe(camera_info_topic_, 1, &YoloTrtNode::cameraInfoCallback, this);
+    odom_sub_ = nh_.subscribe(odom_topic_, 20, &YoloTrtNode::odomCallback, this);
+    if (use_vins_extrinsic_)
+    {
+      extrinsic_sub_ = nh_.subscribe(extrinsic_topic_, 20, &YoloTrtNode::extrinsicCallback, this);
+    }
     annotated_pub_ = it_.advertise("yolo_trt/annotated_image", 1);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("yolo_trt/markers", 1);
+    target_point_pub_ = nh_.advertise<geometry_msgs::PointStamped>(target_topic_, 1);
 
-    ROS_INFO_STREAM("yolo_trt_node ready, engine=" << engine_file_ << ", image_topic=" << image_topic_);
+    ROS_INFO_STREAM("yolo_trt_node ready, engine=" << engine_file_ << ", image_topic=" << image_topic_
+                    << ", depth_topic=" << depth_topic_ << ", camera_info_topic=" << camera_info_topic_
+                    << ", odom_topic=" << odom_topic_ << ", extrinsic_topic=" << extrinsic_topic_
+                    << ", target_topic=" << target_topic_);
   }
 
   ~YoloTrtNode()
@@ -228,6 +263,47 @@ private:
     drawDetections(image, detections);
     publishAnnotatedImage(msg->header, image);
     publishMarkers(msg->header, image.size(), detections);
+    publishTargetPoint(msg->header, detections);
+  }
+
+  void depthCallback(const sensor_msgs::ImageConstPtr& msg)
+  {
+    cv_bridge::CvImageConstPtr cv_ptr;
+    try
+    {
+      cv_ptr = cv_bridge::toCvShare(msg);
+    }
+    catch (const cv_bridge::Exception& e)
+    {
+      ROS_WARN_STREAM_THROTTLE(1.0, "depth cv_bridge exception: " << e.what());
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(depth_mutex_);
+    latest_depth_ = cv_ptr->image.clone();
+    latest_depth_encoding_ = msg->encoding;
+    latest_depth_stamp_ = msg->header.stamp;
+  }
+
+  void cameraInfoCallback(const sensor_msgs::CameraInfoConstPtr& msg)
+  {
+    std::lock_guard<std::mutex> lock(depth_mutex_);
+    latest_camera_info_ = *msg;
+    has_camera_info_ = true;
+  }
+
+  void odomCallback(const nav_msgs::OdometryConstPtr& msg)
+  {
+    std::lock_guard<std::mutex> lock(odom_mutex_);
+    latest_odom_ = *msg;
+    has_odom_ = true;
+  }
+
+  void extrinsicCallback(const nav_msgs::OdometryConstPtr& msg)
+  {
+    std::lock_guard<std::mutex> lock(extrinsic_mutex_);
+    latest_extrinsic_ = *msg;
+    has_extrinsic_ = true;
   }
 
   LetterboxInfo preprocess(const cv::Mat& image)
@@ -379,6 +455,152 @@ private:
     marker_pub_.publish(markers);
   }
 
+  void publishTargetPoint(const std_msgs::Header& header, const std::vector<Detection>& detections)
+  {
+    if (detections.empty())
+    {
+      return;
+    }
+
+    const Detection& target = detections.front();
+    const float u = target.box.x + target.box.width * 0.5f;
+    const float v = target.box.y + target.box.height * 0.5f;
+
+    cv::Mat depth;
+    std::string depth_encoding;
+    sensor_msgs::CameraInfo camera_info;
+    {
+      std::lock_guard<std::mutex> lock(depth_mutex_);
+      if (latest_depth_.empty() || !has_camera_info_)
+      {
+        ROS_WARN_STREAM_THROTTLE(1.0, "waiting for depth image and camera info");
+        return;
+      }
+      depth = latest_depth_.clone();
+      depth_encoding = latest_depth_encoding_;
+      camera_info = latest_camera_info_;
+    }
+
+    const float z = medianDepth(depth, depth_encoding, u, v);
+    if (z <= 0.0f || !std::isfinite(z))
+    {
+      ROS_WARN_STREAM_THROTTLE(1.0, "invalid depth at target center");
+      return;
+    }
+
+    const double fx = camera_info.K[0];
+    const double fy = camera_info.K[4];
+    const double cx = camera_info.K[2];
+    const double cy = camera_info.K[5];
+    if (fx == 0.0 || fy == 0.0)
+    {
+      ROS_WARN_STREAM_THROTTLE(1.0, "invalid camera intrinsics");
+      return;
+    }
+
+    geometry_msgs::PointStamped point;
+    point.header = header;
+    point.header.frame_id = frame_id_.empty() ? global_frame_id_ : frame_id_;
+
+    nav_msgs::Odometry odom;
+    {
+      std::lock_guard<std::mutex> lock(odom_mutex_);
+      if (!has_odom_)
+      {
+        ROS_WARN_STREAM_THROTTLE(1.0, "waiting for odometry");
+        return;
+      }
+      odom = latest_odom_;
+    }
+
+    const tf2::Vector3 target_c((u - cx) * z / fx, (v - cy) * z / fy, z);
+    tf2::Quaternion q_b_c;
+    tf2::Vector3 t_b_c;
+    if (use_vins_extrinsic_)
+    {
+      nav_msgs::Odometry extrinsic;
+      {
+        std::lock_guard<std::mutex> lock(extrinsic_mutex_);
+        if (!has_extrinsic_)
+        {
+          ROS_WARN_STREAM_THROTTLE(1.0, "waiting for VINS camera extrinsic");
+          return;
+        }
+        extrinsic = latest_extrinsic_;
+      }
+      const geometry_msgs::Quaternion& q_ext = extrinsic.pose.pose.orientation;
+      q_b_c = tf2::Quaternion(q_ext.x, q_ext.y, q_ext.z, q_ext.w);
+      const geometry_msgs::Point& t_ext = extrinsic.pose.pose.position;
+      t_b_c = tf2::Vector3(t_ext.x, t_ext.y, t_ext.z);
+    }
+    else
+    {
+      q_b_c.setRPY(camera_roll_, camera_pitch_, camera_yaw_);
+      t_b_c = tf2::Vector3(camera_tx_, camera_ty_, camera_tz_);
+    }
+    q_b_c.normalize();
+    const tf2::Matrix3x3 R_b_c(q_b_c);
+    const tf2::Vector3 target_b = R_b_c * target_c + t_b_c;
+
+    const geometry_msgs::Quaternion& q_msg = odom.pose.pose.orientation;
+    tf2::Quaternion q_w_b(q_msg.x, q_msg.y, q_msg.z, q_msg.w);
+    q_w_b.normalize();
+    const tf2::Matrix3x3 R_w_b(q_w_b);
+    const geometry_msgs::Point& p_msg = odom.pose.pose.position;
+    const tf2::Vector3 p_w_b(p_msg.x, p_msg.y, p_msg.z);
+    const tf2::Vector3 target_w = R_w_b * target_b + p_w_b;
+
+    point.header.frame_id = frame_id_.empty() ? (odom.header.frame_id.empty() ? global_frame_id_ : odom.header.frame_id) : frame_id_;
+    point.point.x = target_w.x();
+    point.point.y = target_w.y();
+    point.point.z = target_w.z();
+    target_point_pub_.publish(point);
+  }
+
+  float medianDepth(const cv::Mat& depth, const std::string& encoding, float u, float v) const
+  {
+    std::vector<float> values;
+    const int center_x = static_cast<int>(std::round(u));
+    const int center_y = static_cast<int>(std::round(v));
+    const int radius = std::max(0, depth_roi_radius_);
+
+    for (int y = std::max(0, center_y - radius); y <= std::min(depth.rows - 1, center_y + radius); ++y)
+    {
+      for (int x = std::max(0, center_x - radius); x <= std::min(depth.cols - 1, center_x + radius); ++x)
+      {
+        float value = 0.0f;
+        if (encoding == sensor_msgs::image_encodings::TYPE_16UC1 ||
+            encoding == sensor_msgs::image_encodings::MONO16)
+        {
+          value = depth.at<uint16_t>(y, x) * depth_scale_;
+        }
+        else if (encoding == sensor_msgs::image_encodings::TYPE_32FC1)
+        {
+          value = depth.at<float>(y, x);
+        }
+        else
+        {
+          ROS_WARN_STREAM_THROTTLE(1.0, "unsupported depth encoding: " << encoding);
+          return 0.0f;
+        }
+
+        if (value > 0.0f && std::isfinite(value))
+        {
+          values.push_back(value);
+        }
+      }
+    }
+
+    if (values.empty())
+    {
+      return 0.0f;
+    }
+
+    const size_t middle = values.size() / 2;
+    std::nth_element(values.begin(), values.begin() + middle, values.end());
+    return values[middle];
+  }
+
   struct RuntimeDeleter
   {
     void operator()(nvinfer1::IRuntime* ptr) const { if (ptr) ptr->destroy(); }
@@ -396,16 +618,48 @@ private:
   ros::NodeHandle pnh_;
   image_transport::ImageTransport it_;
   image_transport::Subscriber image_sub_;
+  ros::Subscriber depth_sub_;
+  ros::Subscriber camera_info_sub_;
+  ros::Subscriber odom_sub_;
+  ros::Subscriber extrinsic_sub_;
   image_transport::Publisher annotated_pub_;
   ros::Publisher marker_pub_;
+  ros::Publisher target_point_pub_;
 
   std::string engine_file_;
   std::string image_topic_;
+  std::string depth_topic_;
+  std::string camera_info_topic_;
+  std::string odom_topic_;
+  std::string extrinsic_topic_;
+  std::string target_topic_;
   std::string frame_id_;
+  std::string global_frame_id_;
   float conf_threshold_ = 0.25f;
   float nms_threshold_ = 0.45f;
+  float depth_scale_ = 0.001f;
+  int depth_roi_radius_ = 3;
+  bool use_vins_extrinsic_ = true;
+  double camera_tx_ = 0.0;
+  double camera_ty_ = 0.0;
+  double camera_tz_ = 0.0;
+  double camera_roll_ = 0.0;
+  double camera_pitch_ = 0.0;
+  double camera_yaw_ = 0.0;
   int detect_hz_ = 30;
   ros::Time last_infer_time_;
+  std::mutex depth_mutex_;
+  std::mutex odom_mutex_;
+  std::mutex extrinsic_mutex_;
+  cv::Mat latest_depth_;
+  std::string latest_depth_encoding_;
+  ros::Time latest_depth_stamp_;
+  sensor_msgs::CameraInfo latest_camera_info_;
+  bool has_camera_info_ = false;
+  nav_msgs::Odometry latest_odom_;
+  bool has_odom_ = false;
+  nav_msgs::Odometry latest_extrinsic_;
+  bool has_extrinsic_ = false;
 
   TrtLogger logger_;
   std::vector<char> engine_data_;

@@ -10,8 +10,11 @@
   <buildtool_depend>catkin</buildtool_depend>
 
   <depend>roscpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>tf2</depend>
   <depend>visualization_msgs</depend>
   <depend>image_transport</depend>
   <depend>cv_bridge_454</depend>

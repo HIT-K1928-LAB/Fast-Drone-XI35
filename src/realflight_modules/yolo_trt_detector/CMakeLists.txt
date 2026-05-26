@@ -6,8 +6,11 @@ set(CMAKE_BUILD_TYPE "Release")
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  geometry_msgs
+  nav_msgs
   sensor_msgs
   std_msgs
+  tf2
   visualization_msgs
   image_transport
   cv_bridge_454
@@ -18,7 +21,7 @@ find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
 
 catkin_package(
-  CATKIN_DEPENDS roscpp sensor_msgs std_msgs visualization_msgs image_transport
+  CATKIN_DEPENDS roscpp geometry_msgs nav_msgs sensor_msgs std_msgs tf2 visualization_msgs image_transport
 )
 
 include_directories(
