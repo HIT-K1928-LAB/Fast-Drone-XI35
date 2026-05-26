@@ -44,7 +44,7 @@ void RC_Data_t::feed(mavros_msgs::RCInConstPtr pMsg) {
     }
 
     mode       = ((double)msg.channels[4] - 1000.0) / 1000.0;
-    gear       = ((double)msg.channels[5] - 1000.0) / 1000.0;
+    gear       = ((double)msg.channels[6] - 1000.0) / 1000.0;
     reboot_cmd = ((double)msg.channels[7] - 1000.0) / 1000.0;
 
     check_validity();
@@ -121,7 +121,7 @@ void RC_Data_t::check_validity() {
     }
 }
 
-bool RC_Data_t::check_centered() {
+bool RC_Data_t::check_centered() const {
     bool centered =
         abs(ch[0]) < 1e-5 && abs(ch[1]) < 1e-5 && abs(ch[2]) < 1e-5 && abs(ch[3]) < 1e-5;
     return centered;

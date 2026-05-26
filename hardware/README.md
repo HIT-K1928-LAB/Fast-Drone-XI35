@@ -1,3 +1,7 @@
+# 整体硬件架构图
+
+![画板](https://cdn.nlark.com/yuque/0/2026/jpeg/8427069/1778150483410-0daa75c6-b4a5-4937-bb7e-8552ff712ccb.jpeg)
+
 # 3d-models
 
 存放无人机组装所需要的所有额外的3d打印件
