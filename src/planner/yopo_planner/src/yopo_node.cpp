@@ -34,6 +34,7 @@ class YopoPlannerNode {
         pnh_.param("max_depth", params.max_depth, params.max_depth);
         pnh_.param("verbose", verbose_, false);
         pnh_.param("visualize", visualize_, true);
+        pnh_.param("wait_for_traj_start_trigger", wait_for_traj_start_trigger_, false);
 
         double goal_x = 50.0;
         double goal_y = 0.0;
@@ -65,9 +66,13 @@ class YopoPlannerNode {
         std::string odom_topic  = "/sim/odom";
         std::string depth_topic = "/depth_image";
         std::string ctrl_topic  = "/so3_control/pos_cmd";
+        std::string traj_start_topic = "/traj_start_trigger";
         pnh_.param<std::string>("odom_topic", odom_topic, odom_topic);
         pnh_.param<std::string>("depth_topic", depth_topic, depth_topic);
         pnh_.param<std::string>("ctrl_topic", ctrl_topic, ctrl_topic);
+        pnh_.param<std::string>("traj_start_topic", traj_start_topic, traj_start_topic);
+
+        control_enabled_ = !wait_for_traj_start_trigger_;
 
         ctrl_pub_      = nh_.advertise<quadrotor_msgs::PositionCommand>(ctrl_topic, 1);
         best_traj_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/yopo_net/best_traj_visual", 1);
@@ -84,10 +89,15 @@ class YopoPlannerNode {
             ros::TransportHints().tcpNoDelay());
         goal_sub_ =
             nh_.subscribe("/move_base_simple/goal", 1, &YopoPlannerNode::goalCallback, this);
+        traj_start_sub_ =
+            nh_.subscribe(traj_start_topic, 1, &YopoPlannerNode::trajStartCallback, this);
         ctrl_timer_ = nh_.createTimer(
             ros::Duration(planner_->params().ctrl_dt), &YopoPlannerNode::controlTimer, this);
 
         warmUp();
+        if (wait_for_traj_start_trigger_) {
+            ROS_INFO("YOPO waiting for %s before publishing control commands.", traj_start_topic.c_str());
+        }
         ROS_INFO("YOPO planner node ready.");
     }
 
@@ -119,6 +129,14 @@ class YopoPlannerNode {
         ROS_INFO(
             "YOPO new goal: %.2f %.2f %.2f", msg->pose.position.x, msg->pose.position.y,
             msg->pose.position.z);
+    }
+
+    void trajStartCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+        (void)msg;
+        if (!control_enabled_) {
+            ROS_INFO("YOPO received traj start trigger, start publishing control commands.");
+        }
+        control_enabled_ = true;
     }
 
     void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
@@ -267,6 +285,8 @@ class YopoPlannerNode {
     }
 
     void controlTimer(const ros::TimerEvent&) {
+        if (!control_enabled_) return;
+
         quadrotor_msgs::PositionCommand cmd;
         if (planner_->fillControlCommand(&cmd)) {
             ctrl_pub_.publish(cmd);
@@ -405,10 +425,13 @@ class YopoPlannerNode {
     ros::Subscriber odom_sub_;
     ros::Subscriber depth_sub_;
     ros::Subscriber goal_sub_;
+    ros::Subscriber traj_start_sub_;
     ros::Timer ctrl_timer_;
 
     bool verbose_              = false;
     bool visualize_            = true;
+    bool wait_for_traj_start_trigger_ = false;
+    bool control_enabled_      = true;
     double depth_fps_          = 30.0;
     int count_                 = 0;
     double time_forward_       = 0.0;

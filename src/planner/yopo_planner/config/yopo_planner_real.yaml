@@ -4,6 +4,8 @@ engine_file: "$(find yopo_planner)/model/yopo.engine"
 odom_topic: "$(arg odom_topic)"
 depth_topic: "$(arg depth_topic)"
 ctrl_topic: "$(arg ctrl_topic)"
+traj_start_topic: "/traj_start_trigger"
+wait_for_traj_start_trigger: true
 
 visualize: true
 verbose: false
