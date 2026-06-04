@@ -23,6 +23,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADDITIONAL_CXX_FLAG}")
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  rosgraph_msgs
   rospy
   cmake_utils
 )
@@ -36,7 +37,7 @@ find_package(Eigen REQUIRED) # try to find manually installed eigen (Usually in 
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES uav_utils
-  CATKIN_DEPENDS roscpp rospy
+  CATKIN_DEPENDS roscpp rosgraph_msgs rospy
   # DEPENDS system_lib
 )
 
@@ -50,6 +51,9 @@ include_directories(
   ${EIGEN_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
+
+add_executable(rosout_file_logger src/rosout_file_logger.cpp)
+target_link_libraries(rosout_file_logger ${catkin_LIBRARIES})
 
 #############
 ## Install ##
@@ -72,6 +76,10 @@ include_directories(
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
+install(TARGETS rosout_file_logger
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
 ## Mark cpp header files for installation
 install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
@@ -80,11 +88,9 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
-# install(FILES
-#   # myfile1
-#   # myfile2
-#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-# )
+install(DIRECTORY launch/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+)
 
 #############
 ## Testing ##

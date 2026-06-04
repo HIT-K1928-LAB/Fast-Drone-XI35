@@ -1,5 +1,6 @@
 sudo chmod 777 /dev/ttyTHS0
 sleep 1;
+roslaunch uav_utils rosout_file_logger.launch & sleep 3;
 roslaunch realsense2_camera rs_camera.launch & sleep 3;
 roslaunch mavros px4.launch & sleep 4;
 roslaunch imu_filter imu_filter.launch & sleep 1;
