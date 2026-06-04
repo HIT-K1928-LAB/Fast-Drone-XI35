@@ -44,6 +44,19 @@ if [ $? != 0 ]; then
     tmux new-window -t $SESH -n "land"
     tmux send-keys -t $SESH:land "sh ~/Fast-Drone-XI35/shfiles/land.sh"
 
+    tmux new-window -t $SESH -n "yopoplaner"
+    tmux send-keys -t $SESH:yopoplaner "export ROS_MASTER_URI=$ROS_MASTER_URI" C-m
+    tmux send-keys -t $SESH:yopoplaner "export ROS_IP=$ROS_IP" C-m
+    tmux send-keys -t $SESH:yopoplaner "source ~/Fast-Drone-XI35/devel/setup.bash" C-m
+    tmux send-keys -t $SESH:yopoplaner "roslaunch yopo_planner yopo_planner.launch"
+
+    tmux new-window -t $SESH -n "pub goal"
+    tmux send-keys -t $SESH:pub goal "export ROS_MASTER_URI=$ROS_MASTER_URI" C-m
+    tmux send-keys -t $SESH:pub goal "export ROS_IP=$ROS_IP" C-m
+    tmux send-keys -t $SESH:pub goal "source ~/Fast-Drone-XI35/devel/setup.bash" C-m
+    tmux send-keys -t $SESH:pub goal "python3 src/planner/yopo_planner/scripts/publish_nav_goal.py"
+
+
     tmux select-window -t $SESH:rspx4
 fi
 
