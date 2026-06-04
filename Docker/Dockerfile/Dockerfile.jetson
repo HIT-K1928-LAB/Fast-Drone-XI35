@@ -43,7 +43,8 @@ RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.tuna.tsinghua
 
 # Install apt packages
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Beijing
+ENV TZ=Asia/Shanghai
+ENV LC_TIME=C.UTF-8
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -113,6 +114,8 @@ RUN apt-get update && \
     update-alternatives --set clangd /usr/bin/clangd-18 && \
     update-alternatives --set clang-format /usr/bin/clang-format-18 && \
     apt-mark hold librealsense2 librealsense2-dev librealsense2-utils librealsense2-dbg && \
+    ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && \
+    echo "${TZ}" > /etc/timezone && \
     echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
