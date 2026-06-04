@@ -7,18 +7,18 @@ ctrl_topic: "$(arg ctrl_topic)"
 traj_start_topic: "/traj_start_trigger"
 wait_for_traj_start_trigger: true
 
-visualize: true
+visualize: false
 verbose: false
 fp16: true
 
-velocity: 1.0
+velocity: 0.2
 ctrl_dt: 0.02
-arrive_distance: 5.0
+arrive_distance: 0.5
 min_depth: 0.04
 max_depth: 20.0
 pitch_angle_deg: 0.0
 plan_from_reference: false
 
-goal_x: 50.0
+goal_x: 0.0
 goal_y: 0.0
-goal_z: 2.0
+goal_z: 1.0

@@ -1,12 +1,12 @@
 <launch>
   <arg name="config_file" default="$(find yopo_planner)/config/yopo_planner_real.yaml"/>
-  <arg name="odom_topic" default="/vins_fusion/imu_propagate"/>
+  <arg name="odom_topic" default="/kf_fusion/kf_imu_odom"/>
   <arg name="depth_topic" default="/camera/depth/image_rect_raw"/>
   <arg name="ctrl_topic" default="/position_cmd"/>
-  <arg name="record_log" default="true"/>
+  <arg name="record_log" default="false"/>
   <arg name="log_dir" default="$(find yopo_planner)/../../../log"/>
   <arg name="bag_prefix" default="yopo_log"/>
-  <arg name="local_occupancy_map" default="true"/>
+  <arg name="local_occupancy_map" default="false"/>
   <arg name="local_map_config" default="$(find local_occupancy_map)/config/local_occupancy_map.yaml"/>
   <arg name="local_map_origin_x" default="-10.0"/>
   <arg name="local_map_origin_y" default="-10.0"/>

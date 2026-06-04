@@ -1,4 +1,5 @@
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <chrono>
 #include <geometry_msgs/PoseStamped.h>
 #include <limits>
@@ -27,6 +28,9 @@ class YopoPlannerNode {
         // param_name param_variable default_value
         pnh_.param("pitch_angle_deg", params.pitch_angle_deg, params.pitch_angle_deg);
         pnh_.param("plan_from_reference", params.plan_from_reference, params.plan_from_reference);
+        pnh_.param(
+            "require_camera_extrinsic", params.require_camera_extrinsic,
+            params.require_camera_extrinsic);
         pnh_.param("velocity", params.velocity, params.velocity);
         pnh_.param("ctrl_dt", params.ctrl_dt, params.ctrl_dt);
         pnh_.param("arrive_distance", params.arrive_distance, params.arrive_distance);
@@ -63,14 +67,16 @@ class YopoPlannerNode {
             return;
         }
 
-        std::string odom_topic  = "/sim/odom";
-        std::string depth_topic = "/depth_image";
-        std::string ctrl_topic  = "/so3_control/pos_cmd";
+        std::string odom_topic       = "/sim/odom";
+        std::string depth_topic      = "/depth_image";
+        std::string ctrl_topic       = "/so3_control/pos_cmd";
         std::string traj_start_topic = "/traj_start_trigger";
+        std::string extrinsic_topic  = "/vins_fusion/extrinsic";
         pnh_.param<std::string>("odom_topic", odom_topic, odom_topic);
         pnh_.param<std::string>("depth_topic", depth_topic, depth_topic);
         pnh_.param<std::string>("ctrl_topic", ctrl_topic, ctrl_topic);
         pnh_.param<std::string>("traj_start_topic", traj_start_topic, traj_start_topic);
+        pnh_.param<std::string>("extrinsic_topic", extrinsic_topic, extrinsic_topic);
 
         control_enabled_ = !wait_for_traj_start_trigger_;
 
@@ -91,12 +97,23 @@ class YopoPlannerNode {
             nh_.subscribe("/move_base_simple/goal", 1, &YopoPlannerNode::goalCallback, this);
         traj_start_sub_ =
             nh_.subscribe(traj_start_topic, 1, &YopoPlannerNode::trajStartCallback, this);
+        extrinsic_sub_ = nh_.subscribe(
+            extrinsic_topic, 1, &YopoPlannerNode::extrinsicCallback, this,
+            ros::TransportHints().tcpNoDelay());
         ctrl_timer_ = nh_.createTimer(
             ros::Duration(planner_->params().ctrl_dt), &YopoPlannerNode::controlTimer, this);
 
         warmUp();
         if (wait_for_traj_start_trigger_) {
-            ROS_INFO("YOPO waiting for %s before publishing control commands.", traj_start_topic.c_str());
+            ROS_INFO(
+                "YOPO waiting for %s before publishing control commands.",
+                traj_start_topic.c_str());
+        }
+        if (planner_->requiresCameraExtrinsic()) {
+            ROS_INFO(
+                "YOPO waiting for camera-to-body extrinsic from %s before publishing control "
+                "commands.",
+                extrinsic_topic.c_str());
         }
         ROS_INFO("YOPO planner node ready.");
     }
@@ -123,6 +140,17 @@ class YopoPlannerNode {
         }
     }
 
+    void extrinsicCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+        const Eigen::Quaterniond q(
+            msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
+            msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+        planner_->setCameraToBodyExtrinsic(q.normalized().toRotationMatrix());
+        if (!extrinsic_ready_logged_) {
+            ROS_INFO("YOPO received camera-to-body extrinsic.");
+            extrinsic_ready_logged_ = true;
+        }
+    }
+
     void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
         planner_->setGoal(
             Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z));
@@ -141,6 +169,10 @@ class YopoPlannerNode {
 
     void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
         if (!planner_->odomInitialized()) return;
+        if (planner_->requiresCameraExtrinsic() && !planner_->cameraExtrinsicReady()) {
+            ROS_WARN_THROTTLE(1.0, "YOPO waiting for camera-to-body extrinsic.");
+            return;
+        }
 
         const auto t0 = Clock::now();
         std::array<float, 1 * 1 * 96 * 160> depth_input{};
@@ -286,6 +318,11 @@ class YopoPlannerNode {
 
     void controlTimer(const ros::TimerEvent&) {
         if (!control_enabled_) return;
+        if (planner_->requiresCameraExtrinsic() && !planner_->cameraExtrinsicReady()) {
+            ROS_WARN_THROTTLE(
+                1.0, "YOPO holds control command until camera-to-body extrinsic is received.");
+            return;
+        }
 
         quadrotor_msgs::PositionCommand cmd;
         if (planner_->fillControlCommand(&cmd)) {
@@ -426,19 +463,21 @@ class YopoPlannerNode {
     ros::Subscriber depth_sub_;
     ros::Subscriber goal_sub_;
     ros::Subscriber traj_start_sub_;
+    ros::Subscriber extrinsic_sub_;
     ros::Timer ctrl_timer_;
 
-    bool verbose_              = false;
-    bool visualize_            = true;
+    bool verbose_                     = false;
+    bool visualize_                   = true;
     bool wait_for_traj_start_trigger_ = false;
-    bool control_enabled_      = true;
-    double depth_fps_          = 30.0;
-    int count_                 = 0;
-    double time_forward_       = 0.0;
-    double time_process_       = 0.0;
-    double time_prepare_       = 0.0;
-    double time_interpolation_ = 0.0;
-    double time_visualize_     = 0.0;
+    bool control_enabled_             = true;
+    bool extrinsic_ready_logged_      = false;
+    double depth_fps_                 = 30.0;
+    int count_                        = 0;
+    double time_forward_              = 0.0;
+    double time_process_              = 0.0;
+    double time_prepare_              = 0.0;
+    double time_interpolation_        = 0.0;
+    double time_visualize_            = 0.0;
 };
 
 }  // namespace yopo_planner

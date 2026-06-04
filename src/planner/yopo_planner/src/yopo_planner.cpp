@@ -61,15 +61,23 @@ YopoPlanner::YopoPlanner(YopoParams params) : params_(params) {
     yaw_diff_           = 0.5 * params_.horizon_anchor_fov / 180.0 * kPi;
     pitch_diff_         = 0.5 * params_.vertical_anchor_fov / 180.0 * kPi;
     rotation_bc_        = rotationFromYawPitchRoll(0.0, params_.pitch_angle_deg / 180.0 * kPi, 0.0);
+    camera_extrinsic_ready_ = !params_.require_camera_extrinsic;
     buildLattice();
     last_all_endstates_.resize(params_.traj_num);
     last_scores_.assign(params_.traj_num, 0.0f);
 }
 
+void YopoPlanner::setCameraToBodyExtrinsic(const Eigen::Matrix3d& rotation_bc) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    rotation_bc_ = rotation_bc;
+    camera_extrinsic_ready_ = true;
+}
+
 void YopoPlanner::setGoal(const Eigen::Vector3d& goal) {
     std::lock_guard<std::mutex> lock(mutex_);
-    goal_   = goal;
-    arrive_ = false;
+    goal_                      = goal;
+    arrive_                    = false;
+    arrival_hover_initialized_ = false;
 }
 
 void YopoPlanner::updateOdometry(const nav_msgs::Odometry& odom) {
@@ -92,13 +100,24 @@ void YopoPlanner::updateOdometry(const nav_msgs::Odometry& odom) {
     const Eigen::Vector3d pos(
         odom.pose.pose.position.x, odom.pose.pose.position.y, odom.pose.pose.position.z);
     if ((pos - goal_).norm() < params_.arrive_distance && !arrive_) {
-        arrive_ = true;
+        const Eigen::Quaterniond q(
+            odom.pose.pose.orientation.w, odom.pose.pose.orientation.x,
+            odom.pose.pose.orientation.y, odom.pose.pose.orientation.z);
+        const Eigen::Matrix3d rotation = q.toRotationMatrix();
+        arrive_                    = true;
+        arrival_hover_pos_         = pos;
+        arrival_hover_yaw_         = std::atan2(rotation(1, 0), rotation(0, 0));
+        arrival_hover_initialized_ = true;
     }
 }
 
 std::array<float, 1 * 9 * 3 * 5> YopoPlanner::prepareObsInput() {
     std::lock_guard<std::mutex> lock(mutex_);
     std::array<float, 1 * 9 * 3 * 5> obs_input{};
+
+    if (params_.require_camera_extrinsic && !camera_extrinsic_ready_) {
+        return obs_input;
+    }
 
     const Eigen::Quaterniond q(
         odom_.pose.pose.orientation.w, odom_.pose.pose.orientation.x, odom_.pose.pose.orientation.y,
@@ -138,6 +157,8 @@ void YopoPlanner::updateTrajectory(
     const std::array<float, 1 * 9 * 3 * 5>& endstate_pred,
     const std::array<float, 1 * 3 * 5>& score_pred, bool return_all_preds) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (params_.require_camera_extrinsic && !camera_extrinsic_ready_) return;
+
     int action_id    = 0;
     float best_score = std::numeric_limits<float>::max();
     for (int i = 0; i < params_.traj_num; ++i) {
@@ -183,12 +204,46 @@ void YopoPlanner::updateTrajectory(
 
 bool YopoPlanner::fillControlCommand(quadrotor_msgs::PositionCommand* cmd) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (params_.require_camera_extrinsic && !camera_extrinsic_ready_) return false;
     if (!cmd || !has_trajectory_ || ctrl_time_ > segment_time_) return false;
 
-    if (arrive_ && has_last_control_msg_) {
-        desire_init_         = false;
-        *cmd                 = last_control_msg_;
+    if (arrive_) {
+        if (!arrival_hover_initialized_ && odom_init_) {
+            const Eigen::Quaterniond q(
+                odom_.pose.pose.orientation.w, odom_.pose.pose.orientation.x,
+                odom_.pose.pose.orientation.y, odom_.pose.pose.orientation.z);
+            const Eigen::Matrix3d rotation = q.toRotationMatrix();
+            arrival_hover_pos_ = Eigen::Vector3d(
+                odom_.pose.pose.position.x, odom_.pose.pose.position.y,
+                odom_.pose.pose.position.z);
+            arrival_hover_yaw_         = std::atan2(rotation(1, 0), rotation(0, 0));
+            arrival_hover_initialized_ = true;
+        }
+
+        cmd->header.stamp    = ros::Time::now();
         cmd->trajectory_flag = quadrotor_msgs::PositionCommand::TRAJECTORY_STATUS_EMPTY;
+        cmd->position.x      = arrival_hover_pos_.x();
+        cmd->position.y      = arrival_hover_pos_.y();
+        cmd->position.z      = arrival_hover_pos_.z();
+        cmd->velocity.x      = 0.0;
+        cmd->velocity.y      = 0.0;
+        cmd->velocity.z      = 0.0;
+        cmd->acceleration.x  = 0.0;
+        cmd->acceleration.y  = 0.0;
+        cmd->acceleration.z  = 0.0;
+        cmd->jerk.x          = 0.0;
+        cmd->jerk.y          = 0.0;
+        cmd->jerk.z          = 0.0;
+        cmd->yaw             = arrival_hover_yaw_;
+        cmd->yaw_dot         = 0.0;
+
+        desire_pos_          = arrival_hover_pos_;
+        desire_vel_.setZero();
+        desire_acc_.setZero();
+        last_yaw_            = arrival_hover_yaw_;
+        desire_init_         = true;
+        last_control_msg_    = *cmd;
+        has_last_control_msg_ = true;
         return true;
     }
 

@@ -33,6 +33,7 @@ struct YopoParams {
     double arrive_distance     = 5.0;
     double pitch_angle_deg     = 0.0;
     bool plan_from_reference   = false;
+    bool require_camera_extrinsic = false;
 };
 
 struct Poly5Solver {
@@ -59,7 +60,10 @@ class YopoPlanner {
     bool odomInitialized() const { return odom_init_; }
     bool arrived() const { return arrive_; }
     bool hasTrajectory() const { return has_trajectory_; }
+    bool cameraExtrinsicReady() const { return camera_extrinsic_ready_; }
+    bool requiresCameraExtrinsic() const { return params_.require_camera_extrinsic; }
 
+    void setCameraToBodyExtrinsic(const Eigen::Matrix3d& rotation_bc);
     void updateOdometry(const nav_msgs::Odometry& odom);
     std::array<float, 1 * 9 * 3 * 5> prepareObsInput();
     void updateTrajectory(
@@ -99,22 +103,26 @@ class YopoPlanner {
     double pitch_diff_           = 0.0;
     Eigen::Matrix3d rotation_bc_ = Eigen::Matrix3d::Identity();
     Eigen::Matrix3d rotation_wc_ = Eigen::Matrix3d::Identity();
+    bool camera_extrinsic_ready_ = false;
 
     std::vector<Eigen::Vector3d> lattice_pos_;
     std::vector<Eigen::Vector2d> lattice_angle_;
     std::vector<Eigen::Matrix3d> lattice_rbp_;
 
     nav_msgs::Odometry odom_;
-    bool odom_init_             = false;
-    bool desire_init_           = false;
-    bool arrive_                = false;
-    bool has_trajectory_        = false;
-    Eigen::Vector3d goal_       = Eigen::Vector3d(50.0, 0.0, 2.0);
-    Eigen::Vector3d desire_pos_ = Eigen::Vector3d::Zero();
-    Eigen::Vector3d desire_vel_ = Eigen::Vector3d::Zero();
-    Eigen::Vector3d desire_acc_ = Eigen::Vector3d::Zero();
-    double last_yaw_            = 0.0;
-    double ctrl_time_           = 0.0;
+    bool odom_init_                 = false;
+    bool desire_init_               = false;
+    bool arrive_                    = false;
+    bool arrival_hover_initialized_ = false;
+    bool has_trajectory_            = false;
+    Eigen::Vector3d goal_              = Eigen::Vector3d(50.0, 0.0, 2.0);
+    Eigen::Vector3d arrival_hover_pos_ = Eigen::Vector3d::Zero();
+    double arrival_hover_yaw_          = 0.0;
+    Eigen::Vector3d desire_pos_        = Eigen::Vector3d::Zero();
+    Eigen::Vector3d desire_vel_        = Eigen::Vector3d::Zero();
+    Eigen::Vector3d desire_acc_        = Eigen::Vector3d::Zero();
+    double last_yaw_                   = 0.0;
+    double ctrl_time_                  = 0.0;
 
     Poly5Solver poly_x_;
     Poly5Solver poly_y_;

@@ -62,7 +62,7 @@ rosrun yopo_planner publish_nav_goal.py 5.0 1.0 2.0 --yaw 30 --frame-id world
 
 订阅
 
-/odom_topic 参数，实机默认 /vins_fusion/imu_propagate，仿真默认 /sim/odom
+/odom_topic 参数，实机默认 /kf_fusion/kf_imu_odom，仿真默认 /sim/odom
 类型：nav_msgs/Odometry
 用途：无人机当前位置、速度、姿态状态
 
