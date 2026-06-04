@@ -63,11 +63,20 @@ void PX4CtrlFSM::handleAutoHover(const ros::Time &now_time, Desired_State_t &des
     set_hov_with_rc();
     des = get_hover_des();
 
-    if (commandSwitchTriggered() || (takeoff_land_ctx.delayed_trigger.first &&
-                                     now_time > takeoff_land_ctx.delayed_trigger.second)) {
-        takeoff_land_ctx.delayed_trigger.first = false;
-        publish_trigger(odom_data.msg);
-        ROS_INFO("\033[32m[px4ctrl] TRIGGER sent, allow planner command.\033[32m");
+    const bool command_switch_triggered = commandSwitchTriggered();
+    const bool delayed_trigger_due      = takeoff_land_ctx.delayed_trigger.first &&
+                                     now_time > takeoff_land_ctx.delayed_trigger.second;
+    if (command_switch_triggered || delayed_trigger_due) {
+        if (canUsePlannerCommand(now_time)) {
+            takeoff_land_ctx.delayed_trigger.first = false;
+            publish_trigger(odom_data.msg);
+            ROS_INFO("\033[32m[px4ctrl] TRIGGER sent, allow planner command.\033[32m");
+        } else if (command_switch_triggered) {
+            ROS_WARN("[px4ctrl] Reject TRIGGER. Drone is not confirmed airborne.");
+        } else {
+            ROS_WARN_THROTTLE(
+                1.0, "[px4ctrl] Hold delayed TRIGGER until drone is confirmed airborne.");
+        }
     }
 }
 
@@ -239,7 +248,34 @@ bool PX4CtrlFSM::canEnterAutoTakeoff(const ros::Time &now_time) const {
 
 bool PX4CtrlFSM::canEnterCmdCtrl(const ros::Time &now_time) const {
     return commandSwitchEnabled() && cmd_is_received(now_time) && !emergency_hover &&
-           !search_hover && state_data.current_state.mode == "OFFBOARD";
+           !search_hover && state_data.current_state.mode == "OFFBOARD" &&
+           canUsePlannerCommand(now_time);
+}
+
+bool PX4CtrlFSM::canUsePlannerCommand(const ros::Time &now_time) const {
+    if (!odom_is_received(now_time)) {
+        ROS_WARN_THROTTLE(1.0, "[px4ctrl] Reject planner command. No recent odom.");
+        return false;
+    }
+
+    if (!state_data.current_state.armed) {
+        ROS_WARN_THROTTLE(1.0, "[px4ctrl] Reject planner command. Drone is not armed.");
+        return false;
+    }
+
+    if (isOnGroundForTakeoff()) {
+        ROS_WARN_THROTTLE(
+            1.0, "[px4ctrl] Reject planner command. Drone is still reported on ground.");
+        return false;
+    }
+
+    if (get_landed()) {
+        ROS_WARN_THROTTLE(
+            1.0, "[px4ctrl] Reject planner command. Land detector still reports landed.");
+        return false;
+    }
+
+    return true;
 }
 
 bool PX4CtrlFSM::isOnGroundForTakeoff() const {

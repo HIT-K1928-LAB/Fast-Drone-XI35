@@ -120,6 +120,7 @@ class PX4CtrlFSM {
     bool canEnterAutoHover(const ros::Time &now_time) const;
     bool canEnterAutoTakeoff(const ros::Time &now_time) const;
     bool canEnterCmdCtrl(const ros::Time &now_time) const;
+    bool canUsePlannerCommand(const ros::Time &now_time) const;
     bool isOnGroundForTakeoff() const;
     bool canAutoTakeoffFromHover() const;
 
