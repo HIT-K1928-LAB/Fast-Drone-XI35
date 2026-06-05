@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <nav_msgs/Odometry.h>
+#include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <ros/ros.h>
 #ifdef YOPO_HAVE_OPENCV_PHOTO
@@ -72,11 +73,43 @@ class YopoPlannerNode {
         std::string ctrl_topic       = "/so3_control/pos_cmd";
         std::string traj_start_topic = "/traj_start_trigger";
         std::string extrinsic_topic  = "/vins_fusion/extrinsic";
+        std::string camera_extrinsic_config;
+        std::string camera_extrinsic_key = "body_T_cam0";
+        std::string motion_capture_odom_topic = "/motion_capture/motion_capture_odom";
+        bool use_motion_capture_odom = false;
+        bool use_config_camera_extrinsic = false;
         pnh_.param<std::string>("odom_topic", odom_topic, odom_topic);
         pnh_.param<std::string>("depth_topic", depth_topic, depth_topic);
         pnh_.param<std::string>("ctrl_topic", ctrl_topic, ctrl_topic);
         pnh_.param<std::string>("traj_start_topic", traj_start_topic, traj_start_topic);
         pnh_.param<std::string>("extrinsic_topic", extrinsic_topic, extrinsic_topic);
+        pnh_.param<std::string>(
+            "camera_extrinsic_config", camera_extrinsic_config, camera_extrinsic_config);
+        pnh_.param<std::string>("camera_extrinsic_key", camera_extrinsic_key, camera_extrinsic_key);
+        pnh_.param<std::string>(
+            "motion_capture_odom_topic", motion_capture_odom_topic, motion_capture_odom_topic);
+        pnh_.param("use_motion_capture_odom", use_motion_capture_odom, use_motion_capture_odom);
+        pnh_.param(
+            "use_config_camera_extrinsic", use_config_camera_extrinsic,
+            use_config_camera_extrinsic);
+        if (use_motion_capture_odom) {
+            odom_topic = motion_capture_odom_topic;
+            ROS_WARN("YOPO using motion capture odometry: %s", odom_topic.c_str());
+        }
+        if (use_config_camera_extrinsic) {
+            Eigen::Matrix3d rotation_body_optical;
+            if (!loadCameraExtrinsicFromConfig(
+                    camera_extrinsic_config, camera_extrinsic_key, &rotation_body_optical)) {
+                ROS_FATAL("Failed to load YOPO camera extrinsic from config.");
+                ros::shutdown();
+                return;
+            }
+            setOpticalToBodyExtrinsic(rotation_body_optical);
+            extrinsic_ready_logged_ = true;
+            ROS_INFO(
+                "YOPO loaded camera optical-to-body extrinsic from %s:%s",
+                camera_extrinsic_config.c_str(), camera_extrinsic_key.c_str());
+        }
 
         control_enabled_ = !wait_for_traj_start_trigger_;
 
@@ -97,9 +130,11 @@ class YopoPlannerNode {
             nh_.subscribe("/move_base_simple/goal", 1, &YopoPlannerNode::goalCallback, this);
         traj_start_sub_ =
             nh_.subscribe(traj_start_topic, 1, &YopoPlannerNode::trajStartCallback, this);
-        extrinsic_sub_ = nh_.subscribe(
-            extrinsic_topic, 1, &YopoPlannerNode::extrinsicCallback, this,
-            ros::TransportHints().tcpNoDelay());
+        if (!use_config_camera_extrinsic) {
+            extrinsic_sub_ = nh_.subscribe(
+                extrinsic_topic, 1, &YopoPlannerNode::extrinsicCallback, this,
+                ros::TransportHints().tcpNoDelay());
+        }
         ctrl_timer_ = nh_.createTimer(
             ros::Duration(planner_->params().ctrl_dt), &YopoPlannerNode::controlTimer, this);
 
@@ -144,11 +179,58 @@ class YopoPlannerNode {
         const Eigen::Quaterniond q(
             msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
             msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
-        planner_->setCameraToBodyExtrinsic(q.normalized().toRotationMatrix());
+        const Eigen::Matrix3d rotation_body_optical = q.normalized().toRotationMatrix();
+        setOpticalToBodyExtrinsic(rotation_body_optical);
         if (!extrinsic_ready_logged_) {
-            ROS_INFO("YOPO received camera-to-body extrinsic.");
+            ROS_INFO("YOPO received camera optical-to-body extrinsic and converted YOPO frame to body.");
             extrinsic_ready_logged_ = true;
         }
+    }
+
+    static Eigen::Matrix3d rotationOpticalYopo() {
+        return (Eigen::Matrix3d() << 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0)
+            .finished();
+    }
+
+    void setOpticalToBodyExtrinsic(const Eigen::Matrix3d& rotation_body_optical) {
+        planner_->setCameraToBodyExtrinsic(rotation_body_optical * rotationOpticalYopo());
+    }
+
+    bool loadCameraExtrinsicFromConfig(
+        const std::string& config_file, const std::string& key,
+        Eigen::Matrix3d* rotation_body_optical) const {
+        if (!rotation_body_optical) return false;
+        if (config_file.empty()) {
+            ROS_ERROR("camera_extrinsic_config is empty.");
+            return false;
+        }
+
+        cv::FileStorage fs(config_file, cv::FileStorage::READ);
+        if (!fs.isOpened()) {
+            ROS_ERROR("Cannot open camera extrinsic config: %s", config_file.c_str());
+            return false;
+        }
+
+        cv::Mat transform;
+        fs[key] >> transform;
+        if (transform.empty()) {
+            ROS_ERROR("Cannot find camera extrinsic key '%s' in %s", key.c_str(), config_file.c_str());
+            return false;
+        }
+        if (transform.rows < 3 || transform.cols < 3) {
+            ROS_ERROR(
+                "Camera extrinsic '%s' must be at least 3x3, got %dx%d.", key.c_str(),
+                transform.rows, transform.cols);
+            return false;
+        }
+
+        transform.convertTo(transform, CV_64F);
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                (*rotation_body_optical)(r, c) = transform.at<double>(r, c);
+            }
+        }
+        return true;
     }
 
     void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {

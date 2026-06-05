@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <ros/console.h>
 
 namespace yopo_planner {
 
@@ -69,7 +70,7 @@ YopoPlanner::YopoPlanner(YopoParams params) : params_(params) {
 
 void YopoPlanner::setCameraToBodyExtrinsic(const Eigen::Matrix3d& rotation_bc) {
     std::lock_guard<std::mutex> lock(mutex_);
-    rotation_bc_ = rotation_bc;
+    rotation_bc_            = rotation_bc;
     camera_extrinsic_ready_ = true;
 }
 
@@ -104,10 +105,10 @@ void YopoPlanner::updateOdometry(const nav_msgs::Odometry& odom) {
             odom.pose.pose.orientation.w, odom.pose.pose.orientation.x,
             odom.pose.pose.orientation.y, odom.pose.pose.orientation.z);
         const Eigen::Matrix3d rotation = q.toRotationMatrix();
-        arrive_                    = true;
-        arrival_hover_pos_         = pos;
-        arrival_hover_yaw_         = std::atan2(rotation(1, 0), rotation(0, 0));
-        arrival_hover_initialized_ = true;
+        arrive_                        = true;
+        arrival_hover_pos_             = pos;
+        arrival_hover_yaw_             = std::atan2(rotation(1, 0), rotation(0, 0));
+        arrival_hover_initialized_     = true;
     }
 }
 
@@ -189,6 +190,13 @@ void YopoPlanner::updateTrajectory(
 
     const Eigen::Vector3d start_pos = currentStartPos();
     const Eigen::Vector3d start_vel = currentStartVel();
+    const Eigen::Vector3d end_pos_w = start_pos + endstate_w.col(0);
+    ROS_WARN_THROTTLE(
+        0.5,
+        "YOPO best end pos: local_yopo_rel=(%.3f %.3f %.3f), world_abs=(%.3f %.3f %.3f), "
+        "score=%.3f",
+        best.pos.x(), best.pos.y(), best.pos.z(), end_pos_w.x(), end_pos_w.y(), end_pos_w.z(),
+        best_score);
     poly_x_.reset(
         start_pos.x(), start_vel.x(), desire_acc_.x(), endstate_w(0, 0) + start_pos.x(),
         endstate_w(0, 1), endstate_w(0, 2), segment_time_);
@@ -213,9 +221,8 @@ bool YopoPlanner::fillControlCommand(quadrotor_msgs::PositionCommand* cmd) {
                 odom_.pose.pose.orientation.w, odom_.pose.pose.orientation.x,
                 odom_.pose.pose.orientation.y, odom_.pose.pose.orientation.z);
             const Eigen::Matrix3d rotation = q.toRotationMatrix();
-            arrival_hover_pos_ = Eigen::Vector3d(
-                odom_.pose.pose.position.x, odom_.pose.pose.position.y,
-                odom_.pose.pose.position.z);
+            arrival_hover_pos_             = Eigen::Vector3d(
+                odom_.pose.pose.position.x, odom_.pose.pose.position.y, odom_.pose.pose.position.z);
             arrival_hover_yaw_         = std::atan2(rotation(1, 0), rotation(0, 0));
             arrival_hover_initialized_ = true;
         }
@@ -237,12 +244,12 @@ bool YopoPlanner::fillControlCommand(quadrotor_msgs::PositionCommand* cmd) {
         cmd->yaw             = arrival_hover_yaw_;
         cmd->yaw_dot         = 0.0;
 
-        desire_pos_          = arrival_hover_pos_;
+        desire_pos_ = arrival_hover_pos_;
         desire_vel_.setZero();
         desire_acc_.setZero();
-        last_yaw_            = arrival_hover_yaw_;
-        desire_init_         = true;
-        last_control_msg_    = *cmd;
+        last_yaw_             = arrival_hover_yaw_;
+        desire_init_          = true;
+        last_control_msg_     = *cmd;
         has_last_control_msg_ = true;
         return true;
     }
