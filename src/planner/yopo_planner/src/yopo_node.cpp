@@ -35,6 +35,7 @@ class YopoPlannerNode {
         pnh_.param("velocity", params.velocity, params.velocity);
         pnh_.param("ctrl_dt", params.ctrl_dt, params.ctrl_dt);
         pnh_.param("arrive_distance", params.arrive_distance, params.arrive_distance);
+        pnh_.param("min_output_height", params.min_output_height, params.min_output_height);
         pnh_.param("min_depth", params.min_depth, params.min_depth);
         pnh_.param("max_depth", params.max_depth, params.max_depth);
         pnh_.param("verbose", verbose_, false);
@@ -68,15 +69,13 @@ class YopoPlannerNode {
             return;
         }
 
-        std::string odom_topic       = "/sim/odom";
+        std::string odom_topic       = "/kf_fusion/kf_imu_odom";
         std::string depth_topic      = "/depth_image";
         std::string ctrl_topic       = "/so3_control/pos_cmd";
         std::string traj_start_topic = "/traj_start_trigger";
         std::string extrinsic_topic  = "/vins_fusion/extrinsic";
         std::string camera_extrinsic_config;
         std::string camera_extrinsic_key = "body_T_cam0";
-        std::string motion_capture_odom_topic = "/motion_capture/motion_capture_odom";
-        bool use_motion_capture_odom = false;
         bool use_config_camera_extrinsic = false;
         pnh_.param<std::string>("odom_topic", odom_topic, odom_topic);
         pnh_.param<std::string>("depth_topic", depth_topic, depth_topic);
@@ -86,16 +85,9 @@ class YopoPlannerNode {
         pnh_.param<std::string>(
             "camera_extrinsic_config", camera_extrinsic_config, camera_extrinsic_config);
         pnh_.param<std::string>("camera_extrinsic_key", camera_extrinsic_key, camera_extrinsic_key);
-        pnh_.param<std::string>(
-            "motion_capture_odom_topic", motion_capture_odom_topic, motion_capture_odom_topic);
-        pnh_.param("use_motion_capture_odom", use_motion_capture_odom, use_motion_capture_odom);
         pnh_.param(
             "use_config_camera_extrinsic", use_config_camera_extrinsic,
             use_config_camera_extrinsic);
-        if (use_motion_capture_odom) {
-            odom_topic = motion_capture_odom_topic;
-            ROS_WARN("YOPO using motion capture odometry: %s", odom_topic.c_str());
-        }
         if (use_config_camera_extrinsic) {
             Eigen::Matrix3d rotation_body_optical;
             if (!loadCameraExtrinsicFromConfig(
@@ -170,8 +162,11 @@ class YopoPlannerNode {
 
     void odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
         planner_->updateOdometry(*msg);
+        ROS_INFO_THROTTLE(
+            5.0, "YOPO odom position: x=%.3f y=%.3f z=%.3f", msg->pose.pose.position.x,
+            msg->pose.pose.position.y, msg->pose.pose.position.z);
         if (planner_->arrived()) {
-            ROS_INFO_THROTTLE(2.0, "YOPO planner arrived near goal.");
+            ROS_WARN_THROTTLE(2.0, "YOPO planner arrived near goal.");
         }
     }
 
@@ -182,14 +177,14 @@ class YopoPlannerNode {
         const Eigen::Matrix3d rotation_body_optical = q.normalized().toRotationMatrix();
         setOpticalToBodyExtrinsic(rotation_body_optical);
         if (!extrinsic_ready_logged_) {
-            ROS_INFO("YOPO received camera optical-to-body extrinsic and converted YOPO frame to body.");
+            ROS_INFO(
+                "YOPO received camera optical-to-body extrinsic and converted YOPO frame to body.");
             extrinsic_ready_logged_ = true;
         }
     }
 
     static Eigen::Matrix3d rotationOpticalYopo() {
-        return (Eigen::Matrix3d() << 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0)
-            .finished();
+        return (Eigen::Matrix3d() << 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0).finished();
     }
 
     void setOpticalToBodyExtrinsic(const Eigen::Matrix3d& rotation_body_optical) {
@@ -214,7 +209,8 @@ class YopoPlannerNode {
         cv::Mat transform;
         fs[key] >> transform;
         if (transform.empty()) {
-            ROS_ERROR("Cannot find camera extrinsic key '%s' in %s", key.c_str(), config_file.c_str());
+            ROS_ERROR(
+                "Cannot find camera extrinsic key '%s' in %s", key.c_str(), config_file.c_str());
             return false;
         }
         if (transform.rows < 3 || transform.cols < 3) {
