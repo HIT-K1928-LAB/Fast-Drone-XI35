@@ -14,9 +14,6 @@
   <arg name="sensing_horizon" default="20.0"/>
   <arg name="sensing_rate" default="30.0"/>
 
-  <arg name="record_log" default="true"/>
-  <arg name="log_dir" default="$(find yopo_planner)/../../../log"/>
-  <arg name="bag_prefix" default="yopo_sim"/>
   <arg name="rviz" default="false"/>
 
   <node pkg="map_generator" name="random_forest" type="random_forest" output="screen">
@@ -101,9 +98,6 @@
     <arg name="odom_topic" value="/sim/odom"/>
     <arg name="depth_topic" value="/pcl_render_node/depth"/>
     <arg name="ctrl_topic" value="/so3_control/pos_cmd"/>
-    <arg name="record_log" value="$(arg record_log)"/>
-    <arg name="log_dir" value="$(arg log_dir)"/>
-    <arg name="bag_prefix" value="$(arg bag_prefix)"/>
     <arg name="local_occupancy_map" value="false"/>
   </include>
 

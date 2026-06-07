@@ -32,7 +32,6 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>quadrotor_msgs</exec_depend>
-  <exec_depend>rosbag</exec_depend>
   <exec_depend>local_occupancy_map</exec_depend>
 
   <export/>

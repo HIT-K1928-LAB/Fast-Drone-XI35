@@ -1,13 +1,8 @@
 <launch>
-  <arg name="config_file" default="$(find yopo_planner)/config/yopo_planner_sim.yaml"/>
-
   <arg name="init_x" default="0.0"/>
   <arg name="init_y" default="0.0"/>
   <arg name="init_z" default="2.0"/>
 
-  <arg name="record_log" default="true"/>
-  <arg name="log_dir" default="$(find yopo_planner)/../../../log"/>
-  <arg name="bag_prefix" default="yopo_sensor_sim"/>
   <arg name="rviz" default="false"/>
 
   <node pkg="so3_quadrotor_simulator"
@@ -55,17 +50,6 @@
         type="sensor_simulator_cuda"
         name="sensor_simulator"
         output="screen"/>
-
-  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
-    <arg name="config_file" value="$(arg config_file)"/>
-    <arg name="odom_topic" value="/sim/odom"/>
-    <arg name="depth_topic" value="/depth_image"/>
-    <arg name="ctrl_topic" value="/so3_control/pos_cmd"/>
-    <arg name="record_log" value="$(arg record_log)"/>
-    <arg name="log_dir" value="$(arg log_dir)"/>
-    <arg name="bag_prefix" value="$(arg bag_prefix)"/>
-    <arg name="local_occupancy_map" value="false"/>
-  </include>
 
   <node if="$(arg rviz)"
         name="rviz"

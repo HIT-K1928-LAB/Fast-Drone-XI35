@@ -10,19 +10,19 @@ use_config_camera_extrinsic: true
 camera_extrinsic_config: "$(find vins)/../config/fast_drone_250.yaml"
 camera_extrinsic_key: "body_T_cam0"
 
-visualize: true
+visualize: false
 verbose: false
 fp16: true
 
-velocity: 6.0
+velocity: 1.0
 ctrl_dt: 0.02
-arrive_distance: 5.0
+arrive_distance: 0.5
 min_output_height: 0.3
 min_depth: 0.04
 max_depth: 20.0
 pitch_angle_deg: 0.0
 plan_from_reference: false
 
-goal_x: 50.0
+goal_x: 0.0
 goal_y: 0.0
 goal_z: 2.0

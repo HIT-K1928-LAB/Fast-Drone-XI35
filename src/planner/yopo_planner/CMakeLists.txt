@@ -106,6 +106,5 @@ add_dependencies(yopo_planner_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_
 catkin_install_python(PROGRAMS
   scripts/export_yopo_onnx.py
   scripts/publish_nav_goal.py
-  scripts/record_yopo_log.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
