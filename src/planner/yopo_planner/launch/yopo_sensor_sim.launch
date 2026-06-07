@@ -3,7 +3,7 @@
   <arg name="init_y" default="0.0"/>
   <arg name="init_z" default="2.0"/>
 
-  <arg name="rviz" default="false"/>
+  <arg name="rviz" default="true"/>
 
   <node pkg="so3_quadrotor_simulator"
         type="quadrotor_simulator_so3"
@@ -55,5 +55,5 @@
         name="rviz"
         pkg="rviz"
         type="rviz"
-        args="-d $(find yopo_planner)/rviz/yopo_sim.rviz"/>
+        args="-d $(find yopo_planner)/rviz/yopo_sensor_sim.rviz"/>
 </launch>
