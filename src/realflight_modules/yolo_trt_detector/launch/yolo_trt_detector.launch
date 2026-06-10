@@ -1,5 +1,5 @@
 <launch>
-  <arg name="engine_file" default="$(find yolo_trt_detector)/models/best_yolo11s_p2.engine" />
+  <arg name="engine_file" default="$(find yolo_trt_detector)/models/best_yolo11s_v2_good.engine" />
   <arg name="image_topic" default="/camera/infra1/image_rect_raw" />
   <arg name="depth_topic" default="/camera/depth/image_rect_raw" />
   <arg name="camera_info_topic" default="/camera/infra1/camera_info" />
