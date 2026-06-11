@@ -31,7 +31,6 @@ struct YopoParams {
     double max_depth           = 20.0;
     double ctrl_dt             = 0.02;
     double arrive_distance     = 5.0;
-    double min_output_height   = 0.3;
     double pitch_angle_deg     = 0.0;
     bool plan_from_reference   = false;
     bool require_camera_extrinsic = false;
@@ -66,6 +65,7 @@ class YopoPlanner {
 
     void setCameraToBodyExtrinsic(const Eigen::Matrix3d& rotation_bc);
     void updateOdometry(const nav_msgs::Odometry& odom);
+    bool syncReferenceFromCurrentOdom();
     std::array<float, 1 * 9 * 3 * 5> prepareObsInput();
     void updateTrajectory(
         const std::array<float, 1 * 9 * 3 * 5>& endstate_pred,
@@ -85,7 +85,6 @@ class YopoPlanner {
     };
 
     void buildLattice();
-    void clampCommandHeightLocked(quadrotor_msgs::PositionCommand* cmd) const;
     void syncReferenceFromOdomLocked();
     EndState predToEndstate(const std::array<float, 1 * 9 * 3 * 5>& pred, int action_id) const;
     EndState predToEndstateByLattice(const Eigen::Matrix<double, 9, 1>& pred, int lattice_id) const;

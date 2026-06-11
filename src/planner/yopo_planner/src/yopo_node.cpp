@@ -1,6 +1,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <chrono>
+#include <cstring>
 #include <geometry_msgs/PoseStamped.h>
 #include <limits>
 #include <memory>
@@ -33,14 +34,16 @@ class YopoPlannerNode {
             "require_camera_extrinsic", params.require_camera_extrinsic,
             params.require_camera_extrinsic);
         pnh_.param("velocity", params.velocity, params.velocity);
+        pnh_.param("radio_range", params.radio_range, params.radio_range);
         pnh_.param("ctrl_dt", params.ctrl_dt, params.ctrl_dt);
         pnh_.param("arrive_distance", params.arrive_distance, params.arrive_distance);
-        pnh_.param("min_output_height", params.min_output_height, params.min_output_height);
         pnh_.param("min_depth", params.min_depth, params.min_depth);
         pnh_.param("max_depth", params.max_depth, params.max_depth);
         pnh_.param("verbose", verbose_, false);
         pnh_.param("visualize", visualize_, true);
         pnh_.param("wait_for_traj_start_trigger", wait_for_traj_start_trigger_, false);
+        pnh_.param("depth_replan_rate", depth_replan_rate_, depth_replan_rate_);
+        if (depth_replan_rate_ < 0.0) depth_replan_rate_ = 0.0;
 
         double goal_x = 50.0;
         double goal_y = 0.0;
@@ -111,6 +114,10 @@ class YopoPlannerNode {
         lattice_traj_pub_ =
             nh_.advertise<sensor_msgs::PointCloud2>("/yopo_net/lattice_trajs_visual", 1);
         log_pub_ = nh_.advertise<yopo_planner::YopoLog>("/yopo_log/log", 10);
+        preprocessed_depth_pub_ =
+            nh_.advertise<sensor_msgs::Image>("/yopo_net/preprocessed_depth", 1);
+        preprocessed_depth_float_pub_ =
+            nh_.advertise<sensor_msgs::Image>("/yopo_net/preprocessed_depth_float", 1);
 
         odom_sub_ = nh_.subscribe(
             odom_topic, 1, &YopoPlannerNode::odomCallback, this,
@@ -135,6 +142,9 @@ class YopoPlannerNode {
             ROS_INFO(
                 "YOPO waiting for %s before publishing control commands.",
                 traj_start_topic.c_str());
+        }
+        if (depth_replan_rate_ > 0.0) {
+            ROS_INFO("YOPO depth replanning limited to %.2f Hz.", depth_replan_rate_);
         }
         if (planner_->requiresCameraExtrinsic()) {
             ROS_INFO(
@@ -163,7 +173,7 @@ class YopoPlannerNode {
     void odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
         planner_->updateOdometry(*msg);
         ROS_INFO_THROTTLE(
-            5.0, "YOPO odom position: x=%.3f y=%.3f z=%.3f", msg->pose.pose.position.x,
+            3.0, "YOPO odom position: x=%.3f y=%.3f z=%.3f", msg->pose.pose.position.x,
             msg->pose.pose.position.y, msg->pose.pose.position.z);
         if (planner_->arrived()) {
             ROS_WARN_THROTTLE(2.0, "YOPO planner arrived near goal.");
@@ -239,8 +249,14 @@ class YopoPlannerNode {
 
     void trajStartCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
         (void)msg;
+        const bool synced = planner_->syncReferenceFromCurrentOdom();
         if (!control_enabled_) {
             ROS_INFO("YOPO received traj start trigger, start publishing control commands.");
+        }
+        if (synced) {
+            ROS_INFO("YOPO synced reference from current odom at traj start trigger.");
+        } else {
+            ROS_WARN("YOPO received traj start trigger before odom was initialized.");
         }
         control_enabled_ = true;
     }
@@ -251,6 +267,7 @@ class YopoPlannerNode {
             ROS_WARN_THROTTLE(1.0, "YOPO waiting for camera-to-body extrinsic.");
             return;
         }
+        if (!shouldProcessDepth()) return;
 
         const auto t0 = Clock::now();
         std::array<float, 1 * 1 * 96 * 160> depth_input{};
@@ -286,8 +303,26 @@ class YopoPlannerNode {
         printTiming(t0, t1, t2, t3, t4, t5, best_score, best_action_id);
     }
 
+    bool shouldProcessDepth() {
+        if (depth_replan_rate_ <= 0.0) return true;
+
+        const auto now = Clock::now();
+        if (!has_last_depth_plan_time_) {
+            last_depth_plan_time_     = now;
+            has_last_depth_plan_time_ = true;
+            return true;
+        }
+
+        const double elapsed_sec =
+            std::chrono::duration<double>(now - last_depth_plan_time_).count();
+        if (elapsed_sec < 1.0 / depth_replan_rate_) return false;
+
+        last_depth_plan_time_ = now;
+        return true;
+    }
+
     bool prepareDepth(
-        const sensor_msgs::Image& msg, std::array<float, 1 * 1 * 96 * 160>* depth_input) const {
+        const sensor_msgs::Image& msg, std::array<float, 1 * 1 * 96 * 160>* depth_input) {
         if (!depth_input) return false;
 
         cv::Mat depth_meters(msg.height, msg.width, CV_32FC1);
@@ -349,6 +384,8 @@ class YopoPlannerNode {
         fillInvalidDepth(invalid_mask, &inpainted);
 #endif
 
+        publishPreprocessedDepth(msg.header, inpainted);
+
         for (int r = 0; r < params.image_height; ++r) {
             const float* src = inpainted.ptr<float>(r);
             for (int c = 0; c < params.image_width; ++c) {
@@ -392,6 +429,40 @@ class YopoPlannerNode {
             remaining = next_remaining;
         }
         *depth = current;
+    }
+
+    void publishPreprocessedDepth(const std_msgs::Header& header, const cv::Mat& normalized_depth) {
+        if (preprocessed_depth_pub_.getNumSubscribers() > 0) {
+            cv::Mat display_u8;
+            normalized_depth.convertTo(display_u8, CV_8UC1, 255.0);
+
+            sensor_msgs::Image msg;
+            msg.header       = header;
+            msg.height       = static_cast<uint32_t>(display_u8.rows);
+            msg.width        = static_cast<uint32_t>(display_u8.cols);
+            msg.encoding     = "mono8";
+            msg.is_bigendian = false;
+            msg.step         = static_cast<sensor_msgs::Image::_step_type>(display_u8.cols);
+            msg.data.assign(display_u8.datastart, display_u8.dataend);
+            preprocessed_depth_pub_.publish(msg);
+        }
+
+        if (preprocessed_depth_float_pub_.getNumSubscribers() > 0) {
+            cv::Mat continuous_depth = normalized_depth.isContinuous() ? normalized_depth
+                                                                       : normalized_depth.clone();
+
+            sensor_msgs::Image msg;
+            msg.header       = header;
+            msg.height       = static_cast<uint32_t>(continuous_depth.rows);
+            msg.width        = static_cast<uint32_t>(continuous_depth.cols);
+            msg.encoding     = "32FC1";
+            msg.is_bigendian = false;
+            msg.step =
+                static_cast<sensor_msgs::Image::_step_type>(continuous_depth.cols * sizeof(float));
+            msg.data.resize(static_cast<size_t>(msg.step) * msg.height);
+            std::memcpy(msg.data.data(), continuous_depth.ptr<float>(), msg.data.size());
+            preprocessed_depth_float_pub_.publish(msg);
+        }
     }
 
     void controlTimer(const ros::TimerEvent&) {
@@ -537,6 +608,8 @@ class YopoPlannerNode {
     ros::Publisher all_trajs_pub_;
     ros::Publisher lattice_traj_pub_;
     ros::Publisher log_pub_;
+    ros::Publisher preprocessed_depth_pub_;
+    ros::Publisher preprocessed_depth_float_pub_;
     ros::Subscriber odom_sub_;
     ros::Subscriber depth_sub_;
     ros::Subscriber goal_sub_;
@@ -549,13 +622,16 @@ class YopoPlannerNode {
     bool wait_for_traj_start_trigger_ = false;
     bool control_enabled_             = true;
     bool extrinsic_ready_logged_      = false;
-    double depth_fps_                 = 30.0;
-    int count_                        = 0;
-    double time_forward_              = 0.0;
-    double time_process_              = 0.0;
-    double time_prepare_              = 0.0;
-    double time_interpolation_        = 0.0;
-    double time_visualize_            = 0.0;
+    bool has_last_depth_plan_time_    = false;
+    Clock::time_point last_depth_plan_time_;
+    double depth_replan_rate_  = 0.0;
+    double depth_fps_          = 30.0;
+    int count_                 = 0;
+    double time_forward_       = 0.0;
+    double time_process_       = 0.0;
+    double time_prepare_       = 0.0;
+    double time_interpolation_ = 0.0;
+    double time_visualize_     = 0.0;
 };
 
 }  // namespace yopo_planner

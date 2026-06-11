@@ -13,11 +13,12 @@ camera_extrinsic_key: "body_T_cam0"
 visualize: false
 verbose: false
 fp16: true
+depth_replan_rate: 0.0
 
-velocity: 1.0
+velocity: 1
+radio_range: 5.0
 ctrl_dt: 0.02
-arrive_distance: 0.5
-min_output_height: 0.3
+arrive_distance: 1
 min_depth: 0.04
 max_depth: 20.0
 pitch_angle_deg: 0.0

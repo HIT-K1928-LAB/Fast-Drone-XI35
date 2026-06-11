@@ -112,6 +112,24 @@ void YopoPlanner::updateOdometry(const nav_msgs::Odometry& odom) {
     }
 }
 
+bool YopoPlanner::syncReferenceFromCurrentOdom() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!odom_init_) return false;
+
+    syncReferenceFromOdomLocked();
+    desire_init_          = true;
+    has_trajectory_       = false;
+    has_last_control_msg_ = false;
+    ctrl_time_            = 0.0;
+
+    if (arrive_) {
+        arrival_hover_pos_         = desire_pos_;
+        arrival_hover_yaw_         = last_yaw_;
+        arrival_hover_initialized_ = true;
+    }
+    return true;
+}
+
 std::array<float, 1 * 9 * 3 * 5> YopoPlanner::prepareObsInput() {
     std::lock_guard<std::mutex> lock(mutex_);
     std::array<float, 1 * 9 * 3 * 5> obs_input{};
@@ -165,87 +183,43 @@ void YopoPlanner::updateTrajectory(
     const Eigen::Vector3d start_vel  = currentStartVel();
     const Eigen::Vector3d goal_dir_w = goal_ - start_pos;
 
+    int action_id    = 0;
+    float best_score = std::numeric_limits<float>::max();
+    for (int i = 0; i < params_.traj_num; ++i) {
+        last_scores_[i] = score_pred[i];
+        if (score_pred[i] < best_score) {
+            best_score = score_pred[i];
+            action_id  = i;
+        }
+    }
+
     if (return_all_preds) {
         for (int i = 0; i < params_.traj_num; ++i) {
             last_all_endstates_[i] = predToEndstate(endstate_pred, i);
         }
-    }
-
-    int action_id       = 0;
-    float best_score    = std::numeric_limits<float>::max();
-    bool found_safe     = false;
-    int rejected_height = 0;
-    EndState best;
-    Eigen::Matrix<double, 3, 3> best_endstate_w = Eigen::Matrix<double, 3, 3>::Zero();
-    Eigen::Vector3d best_end_pos_w              = start_pos;
-
-    for (int i = 0; i < params_.traj_num; ++i) {
-        last_scores_[i] = score_pred[i];
-        const EndState candidate =
-            return_all_preds ? last_all_endstates_[i] : predToEndstate(endstate_pred, i);
-        const Eigen::Matrix<double, 3, 3> candidate_c =
-            (Eigen::Matrix<double, 3, 3>() << candidate.pos.x(), candidate.vel.x(),
-             candidate.acc.x(), candidate.pos.y(), candidate.vel.y(), candidate.acc.y(),
-             candidate.pos.z(), candidate.vel.z(), candidate.acc.z())
-                .finished();
-        const Eigen::Matrix<double, 3, 3> candidate_w = rotation_wc_ * candidate_c;
-        const Eigen::Vector3d candidate_end_pos_w     = start_pos + candidate_w.col(0);
-        if (candidate_end_pos_w.z() < params_.min_output_height) {
-            ++rejected_height;
-            continue;
-        }
-        if (score_pred[i] < best_score) {
-            best_score       = score_pred[i];
-            action_id        = i;
-            best             = candidate;
-            best_endstate_w  = candidate_w;
-            best_end_pos_w   = candidate_end_pos_w;
-            found_safe       = true;
-        }
-    }
-
-    if (!found_safe) {
-        best_score                    = score_pred[action_id];
-        best.pos.setZero();
-        best.vel.setZero();
-        best.acc.setZero();
-        best_endstate_w.setZero();
-        best_end_pos_w = start_pos;
-        best_end_pos_w.z() = std::max(start_pos.z(), params_.min_output_height);
-        best_endstate_w(2, 0) = best_end_pos_w.z() - start_pos.z();
-        ROS_WARN_THROTTLE(
-            0.5,
-            "YOPO height guard rejected all %d candidates below %.2fm; fallback end z=%.3f.",
-            rejected_height, params_.min_output_height, best_end_pos_w.z());
-    }
-
-    if (!return_all_preds) {
-        last_all_endstates_[0] = best;
+    } else {
+        last_all_endstates_[0] = predToEndstate(endstate_pred, action_id);
         last_scores_[0]        = best_score;
         action_id              = 0;
     }
 
-    const EndState& best_ref =
-        found_safe ? (return_all_preds ? last_all_endstates_[action_id] : last_all_endstates_[0])
-                   : best;
+    const EndState& best = return_all_preds ? last_all_endstates_[action_id]
+                                            : last_all_endstates_[0];
     const Eigen::Matrix<double, 3, 3> endstate_c =
-        (Eigen::Matrix<double, 3, 3>() << best_ref.pos.x(), best_ref.vel.x(), best_ref.acc.x(),
-         best_ref.pos.y(), best_ref.vel.y(), best_ref.acc.y(), best_ref.pos.z(), best_ref.vel.z(),
-         best_ref.acc.z())
+        (Eigen::Matrix<double, 3, 3>() << best.pos.x(), best.vel.x(), best.acc.x(), best.pos.y(),
+         best.vel.y(), best.acc.y(), best.pos.z(), best.vel.z(), best.acc.z())
             .finished();
-    const Eigen::Matrix<double, 3, 3> endstate_w =
-        found_safe ? rotation_wc_ * endstate_c : best_endstate_w;
-    const Eigen::Vector3d end_delta_w = endstate_w.col(0);
-    const Eigen::Vector3d end_pos_w   = start_pos + end_delta_w;
+    const Eigen::Matrix<double, 3, 3> endstate_w = rotation_wc_ * endstate_c;
+    const Eigen::Vector3d end_delta_w            = endstate_w.col(0);
+    const Eigen::Vector3d end_pos_w              = start_pos + end_delta_w;
     ROS_WARN_THROTTLE(
-        0.5,
+        3.0,
         "YOPO best end pos: start=(%.3f %.3f %.3f), local_yopo_rel=(%.3f %.3f %.3f), "
         "world_delta=(%.3f %.3f %.3f), world_abs=(%.3f %.3f %.3f), goal_dir=(%.3f %.3f %.3f), "
-        "score=%.3f, height_rejected=%d",
-        start_pos.x(), start_pos.y(), start_pos.z(), best_ref.pos.x(), best_ref.pos.y(), best_ref.pos.z(),
+        "score=%.3f",
+        start_pos.x(), start_pos.y(), start_pos.z(), best.pos.x(), best.pos.y(), best.pos.z(),
         end_delta_w.x(), end_delta_w.y(), end_delta_w.z(), end_pos_w.x(), end_pos_w.y(),
-        end_pos_w.z(), goal_dir_w.x(), goal_dir_w.y(), goal_dir_w.z(), best_score,
-        rejected_height);
+        end_pos_w.z(), goal_dir_w.x(), goal_dir_w.y(), goal_dir_w.z(), best_score);
     poly_x_.reset(
         start_pos.x(), start_vel.x(), desire_acc_.x(), endstate_w(0, 0) + start_pos.x(),
         endstate_w(0, 1), endstate_w(0, 2), segment_time_);
@@ -255,6 +229,7 @@ void YopoPlanner::updateTrajectory(
     poly_z_.reset(
         start_pos.z(), start_vel.z(), desire_acc_.z(), endstate_w(2, 0) + start_pos.z(),
         endstate_w(2, 1), endstate_w(2, 2), segment_time_);
+
     ctrl_time_      = 0.0;
     has_trajectory_ = true;
 }
@@ -292,7 +267,6 @@ bool YopoPlanner::fillControlCommand(quadrotor_msgs::PositionCommand* cmd) {
         cmd->jerk.z          = 0.0;
         cmd->yaw             = arrival_hover_yaw_;
         cmd->yaw_dot         = 0.0;
-        clampCommandHeightLocked(cmd);
 
         if (odom_init_) {
             syncReferenceFromOdomLocked();
@@ -323,7 +297,13 @@ bool YopoPlanner::fillControlCommand(quadrotor_msgs::PositionCommand* cmd) {
     cmd->jerk.x          = poly_x_.jerk(ctrl_time_);
     cmd->jerk.y          = poly_y_.jerk(ctrl_time_);
     cmd->jerk.z          = poly_z_.jerk(ctrl_time_);
-    clampCommandHeightLocked(cmd);
+
+    ROS_WARN_THROTTLE(
+        1.0,
+        "YOPO position_cmd z: t=%.3f/%.3f, cmd_z=%.3f, cmd_vz=%.3f, cmd_az=%.3f, "
+        "odom_z=%.3f, goal_z=%.3f",
+        ctrl_time_, segment_time_, cmd->position.z, cmd->velocity.z, cmd->acceleration.z,
+        odom_.pose.pose.position.z, goal_.z());
 
     desire_pos_    = Eigen::Vector3d(cmd->position.x, cmd->position.y, cmd->position.z);
     desire_vel_    = Eigen::Vector3d(cmd->velocity.x, cmd->velocity.y, cmd->velocity.z);
@@ -451,15 +431,6 @@ void YopoPlanner::buildLattice() {
             }
         }
     }
-}
-
-void YopoPlanner::clampCommandHeightLocked(quadrotor_msgs::PositionCommand* cmd) const {
-    if (!cmd || cmd->position.z >= params_.min_output_height) return;
-
-    cmd->position.z = params_.min_output_height;
-    if (cmd->velocity.z < 0.0) cmd->velocity.z = 0.0;
-    if (cmd->acceleration.z < 0.0) cmd->acceleration.z = 0.0;
-    if (cmd->jerk.z < 0.0) cmd->jerk.z = 0.0;
 }
 
 void YopoPlanner::syncReferenceFromOdomLocked() {
