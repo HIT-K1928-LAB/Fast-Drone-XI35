@@ -18,12 +18,13 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_ros
   message_filters
   cv_bridge_454
+  plan_env
 )
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES local_occupancy_map
-  CATKIN_DEPENDS roscpp sensor_msgs nav_msgs pcl_ros message_filters cv_bridge_454
+  CATKIN_DEPENDS roscpp sensor_msgs nav_msgs pcl_ros message_filters cv_bridge_454 plan_env
   DEPENDS OpenCV PCL
 )
 

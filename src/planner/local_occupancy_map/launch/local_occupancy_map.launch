@@ -1,7 +1,9 @@
 <launch>
   <arg name="depth_topic" default="/camera/depth/image_rect_raw"/>
-  <arg name="odom_topic" default="/vins_fusion/imu_propagate"/>
+  <arg name="odom_topic" default="/kf_fusion/kf_imu_odom"/>
   <arg name="config_file" default="$(find local_occupancy_map)/config/local_occupancy_map.yaml"/>
+  <arg name="camera_extrinsic_config" default="$(find vins)/../config/fast_drone_250.yaml"/>
+  <arg name="camera_extrinsic_key" default="body_T_cam0"/>
   <arg name="map_origin_x" default="-10.0"/>
   <arg name="map_origin_y" default="-10.0"/>
   <arg name="map_origin_z" default="-0.01"/>
@@ -21,6 +23,8 @@
     <param name="map_size_x" value="$(arg map_size_x)"/>
     <param name="map_size_y" value="$(arg map_size_y)"/>
     <param name="map_size_z" value="$(arg map_size_z)"/>
+    <param name="camera_extrinsic_config" value="$(arg camera_extrinsic_config)"/>
+    <param name="camera_extrinsic_key" value="$(arg camera_extrinsic_key)"/>
     <remap from="~depth" to="$(arg depth_topic)"/>
     <remap from="~odom" to="$(arg odom_topic)"/>
   </node>

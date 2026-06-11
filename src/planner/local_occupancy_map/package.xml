@@ -15,6 +15,7 @@
   <build_depend>pcl_ros</build_depend>
   <build_depend>message_filters</build_depend>
   <build_depend>cv_bridge_454</build_depend>
+  <build_depend>plan_env</build_depend>
 
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>sensor_msgs</build_export_depend>
@@ -22,6 +23,7 @@
   <build_export_depend>pcl_ros</build_export_depend>
   <build_export_depend>message_filters</build_export_depend>
   <build_export_depend>cv_bridge_454</build_export_depend>
+  <build_export_depend>plan_env</build_export_depend>
 
   <exec_depend>roscpp</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
@@ -29,6 +31,7 @@
   <exec_depend>pcl_ros</exec_depend>
   <exec_depend>message_filters</exec_depend>
   <exec_depend>cv_bridge_454</exec_depend>
+  <exec_depend>plan_env</exec_depend>
 
   <export/>
 </package>
