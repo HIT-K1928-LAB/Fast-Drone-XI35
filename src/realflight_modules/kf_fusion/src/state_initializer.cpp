@@ -75,7 +75,7 @@ bool StateInitializer::initGyroBias() {
         "StateInitializer: bias initializing successfully! bias_gyro:[%f, %f, "
         "%f].",
         state_.bias_gyro[0], state_.bias_gyro[1], state_.bias_gyro[2]);
-    ROS_INFO(
+    ROS_WARN(
         "StateInitializer: gyro_avg_norm: %f, accel_avg_norm: %f, gyro_var: "
         "%f, accel_var: %f, the que size is %ld",
         gyro_avg_norm, accel_avg_norm, gyro_var, accel_var, imu_que_.size());

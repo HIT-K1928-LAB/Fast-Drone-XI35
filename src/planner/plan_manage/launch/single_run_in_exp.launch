@@ -3,12 +3,12 @@
     <arg name="obj_num" value="10" />
     <arg name="drone_id" value="0"/>
 
-    <arg name="map_size_x" value="150"/>
-    <arg name="map_size_y" value="100"/>
-    <arg name="map_size_z" value="9.0"/>
+    <arg name="map_size_x" value="20"/>
+    <arg name="map_size_y" value="20"/>
+    <arg name="map_size_z" value="3.0"/>
 
     <arg name="map_origin_x" value="-10.0"/>
-    <arg name="map_origin_y" value="-58.0"/>
+    <arg name="map_origin_y" value="-10.0"/>
 
     <arg name="odom_topic" value="/vins_fusion/imu_propagate"/>
     

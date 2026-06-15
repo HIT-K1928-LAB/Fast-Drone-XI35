@@ -1,4 +1,5 @@
 #include "kf_nav/kf_interface.h"
+#include "ros/console_backend.h"
 #include <ros/ros.h>
 
 int main(int argc, char **argv) {

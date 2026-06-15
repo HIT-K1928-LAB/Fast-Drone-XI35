@@ -6,7 +6,7 @@
         <param name="cov_threshold_1" value="0.08" type="double"/>
         <param name="cov_threshold_2" value="1.0" type="double"/>
         <param name="kf_cov_threshold" value="4.0" type="double"/>
-        <param name="drone_id" value="3" type="int"/>
+        <param name="drone_id" value="2" type="int"/>
         <param name="target_PubDuration" value="1" type="double"/>
         <param name="open_visualization" value="true" type="bool"/>
         <param name="use_judge_reliable" value="true" type="bool"/>

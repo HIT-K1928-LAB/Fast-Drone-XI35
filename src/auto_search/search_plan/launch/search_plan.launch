@@ -1,14 +1,14 @@
 <launch>
 
     <!-- search strategy waypoints (Convenience for template generation)-->
-    <arg name="point_num" value="3" />
+    <arg name="point_num" value="2" />
 
-    <arg name="point0_x" value="3.5" />
+    <arg name="point0_x" value="3.0" />
     <arg name="point0_y" value="0.0" />
     <arg name="point0_z" value="0.7" />
 
-    <arg name="point1_x" value="3.5" />
-    <arg name="point1_y" value="1.5" />
+    <arg name="point1_x" value="0.0" />
+    <arg name="point1_y" value="0.0" />
     <arg name="point1_z" value="0.7" />
 
     <arg name="point2_x" value="0.0" />
@@ -25,14 +25,14 @@
 
     <node pkg="search_plan" name="search_plan_node" type="search_node" output="screen">
         <param name="drone_id" value="1" type="int"/>
-        <param name="total_drone_num" value="3" type="int"/>
+        <param name="total_drone_num" value="2" type="int"/>
         <param name="sent_times" value="20" type="int"/>
-        <param name="sent_colla_signal_dura" value="5.0" type="double"/>
-        <param name="enable_colla_mode" value="true" type="bool"/>
+        <param name="sent_colla_signal_dura" value="4.0" type="double"/>
+        <param name="enable_colla_mode" value="false" type="bool"/>
 
-        <param name="odom_topic" value="/vins_fusion/imu_propagate" type="string"/>
+        <param name="odom_topic" value="/kf_fusion/kf_imu_odom" type="string"/>
         <param name="exec_frequency" value="100" type="double"/>
-        <param name="arrive_threshold" value="0.5" type="double"/>
+        <param name="arrive_threshold" value="0.4" type="double"/>
         <param name="publish_target_threshold" value="0.2" type="double"/>
         <param name="target_msg_timeout" value="5.0" type="double"/>
         <param name="target_converge_th" value="0.10" type="double"/>

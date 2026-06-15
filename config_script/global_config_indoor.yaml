@@ -11,14 +11,14 @@ paths:
   src/realflight_modules/VINS-Fusion-gpu/config/fast_drone_250.yaml:
     -
       # 里程计类型，0 不加偏置，1 加偏置（统一集群的世界坐标系）
-      "odometry_type: \\d+": "odometry_type: 1"
+      "odometry_type: \\d+": "odometry_type: 0"
       # 无人机个体 id
-      "drone_id: \\d+": "drone_id: 2"
+      "drone_id: \\d+": "drone_id: 1"
       # 偏置/坐标变换的数值
       "single_offset: -*\\d+.\\d+": "single_offset: 2.0"
 
       # 显示特征点追踪
-      "show_track: \\d+": "show_track: 1"
+      "show_track: \\d+": "show_track: 3"
 
   src/auto_search/search_plan/launch/search_plan.launch:
     - 
@@ -34,24 +34,24 @@ paths:
       # 无人机由起降区飞往拒止区的第一个点，即起始点，每一架各不相同
       # 与偏置相关
       <param name="search_startpoint_x" value="-*\d+.\d+" type="double"/>: <param name="search_startpoint_x" value="1.0" type="double"/>
-      <param name="search_startpoint_y" value="-*\d+.\d+" type="double"/>: <param name="search_startpoint_y" value="-2.0" type="double"/>
+      <param name="search_startpoint_y" value="-*\d+.\d+" type="double"/>: <param name="search_startpoint_y" value="0.0" type="double"/>
       <param name="search_startpoint_z" value="-*\d+.\d+" type="double"/>: <param name="search_startpoint_z" value="0.7" type="double"/>
 
       # 搜索策略给定的路标点，每一架各不相同
       # 与偏置相关
-      <arg name="point_num" value="\d+" />: <arg name="point_num" value="3" />
+      <arg name="point_num" value="\d+" />: <arg name="point_num" value="2" />
 
-      <arg name="point0_x" value="-*\d+.\d+" />: <arg name="point0_x" value="3.5" />
-      <arg name="point0_y" value="-*\d+.\d+" />: <arg name="point0_y" value="-2.0" />
+      <arg name="point0_x" value="-*\d+.\d+" />: <arg name="point0_x" value="3.0" />
+      <arg name="point0_y" value="-*\d+.\d+" />: <arg name="point0_y" value="0.0" />
       <arg name="point0_z" value="-*\d+.\d+" />: <arg name="point0_z" value="0.7" />
 
-      <arg name="point1_x" value="-*\d+.\d+" />: <arg name="point1_x" value="3.5" />
+      <arg name="point1_x" value="-*\d+.\d+" />: <arg name="point1_x" value="0.0" />
       <arg name="point1_y" value="-*\d+.\d+" />: <arg name="point1_y" value="0.0" />
       <arg name="point1_z" value="-*\d+.\d+" />: <arg name="point1_z" value="0.7" />
 
-      <arg name="point2_x" value="-*\d+.\d+" />: <arg name="point2_x" value="0.0" />
-      <arg name="point2_y" value="-*\d+.\d+" />: <arg name="point2_y" value="0.0" />
-      <arg name="point2_z" value="-*\d+.\d+" />: <arg name="point2_z" value="0.7" />
+      # <arg name="point2_x" value="-*\d+.\d+" />: <arg name="point2_x" value="0.0" />
+      # <arg name="point2_y" value="-*\d+.\d+" />: <arg name="point2_y" value="0.0" />
+      # <arg name="point2_z" value="-*\d+.\d+" />: <arg name="point2_z" value="0.7" />
 
       # <arg name="point3_x" value="-*\d+.\d+" />: <arg name="point3_x" value="0.0" />
       # <arg name="point3_y" value="-*\d+.\d+" />: <arg name="point3_y" value="0.0" />
@@ -64,14 +64,14 @@ paths:
   src/realflight_modules/px4ctrl/config/ctrl_param_fpv.yaml:
     - 
       # 起飞高度
-      "takeoff_height: \\d+.\\d+": "takeoff_height: 0.7"
+      "takeoff_height: \\d+.\\d+": "takeoff_height: 1"
       # 起飞上升速度
-      "takeoff_land_speed: \\d+.\\d+": "takeoff_land_speed: 0.4"
+      "takeoff_land_speed: \\d+.\\d+": "takeoff_land_speed: 0.2"
 
   src/planner/plan_manage/launch/advanced_param_exp.xml:
     - 
       # ego planner 栅格地图的分辨率，单位[m]
-      "<param name=\"grid_map/resolution\"      value=\"\\d+.\\d+\" />": "<param name=\"grid_map/resolution\"      value=\"1.0\" />"
+      "<param name=\"grid_map/resolution\"      value=\"\\d+.\\d+\" />": "<param name=\"grid_map/resolution\"      value=\"0.2\" />"
       # ego planner 深度图滤波器，低于此值的深度不被用于栅格地图构建
       "<param name=\"grid_map/depth_filter_mindist\"   value=\"\\d+.\\d+\"/>": "<param name=\"grid_map/depth_filter_mindist\"   value=\"3.0\"/>"
 
@@ -88,7 +88,7 @@ paths:
 
 
       # ego planner 规划的最大速度和加速度
-      "<arg name=\"max_vel\" value=\"\\d+.\\d+\" />": "<arg name=\"max_vel\" value=\"0.4\" />"
+      "<arg name=\"max_vel\" value=\"\\d+.\\d+\" />": "<arg name=\"max_vel\" value=\"0.5\" />"
       "<arg name=\"max_acc\" value=\"\\d+.\\d+\" />": "<arg name=\"max_acc\" value=\"3.0\" />"
 
       # 提供给 ego planner 的路标点
