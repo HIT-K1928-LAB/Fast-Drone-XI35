@@ -20,6 +20,7 @@ class KfInterface {
         std::string odom_topic;
         std::string vins_invalid_topic;
         bool use_motion_capture;
+        bool use_zupt;
         void loadConfig() {
             imu_topic          = ParamReader::getInstance().getString("imu_topic", "/imu/data");
             use_motion_capture = ParamReader::getInstance().getBool("use_motion_capture", false);
@@ -31,6 +32,7 @@ class KfInterface {
             } else {
                 odom_topic = ParamReader::getInstance().getString("odom_topic", "/odom/data");
             }
+            use_zupt = ParamReader::getInstance().getBool("use_zupt", false);
         }
     };
     KfInterface() {

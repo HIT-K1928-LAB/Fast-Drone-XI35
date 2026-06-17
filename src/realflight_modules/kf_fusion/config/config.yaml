@@ -13,6 +13,9 @@ gyro_walk_std: 1e-4
 # motion capture
 use_motion_capture: false
 
+# zupt enable
+use_zupt: false
+
 # bias relevant
 enable_merge_vins_bias: true #融合vins零偏
 bias_accel_init: [-0.14, 0.038, 0.167]

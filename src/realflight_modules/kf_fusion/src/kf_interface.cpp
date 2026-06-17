@@ -36,19 +36,21 @@ void KfInterface::processMeasurements() {
                         case MeasureType::kImu: {
                             auto imu_meas = std::static_pointer_cast<ImuMeas>(meas);
                             kf_coordiantor_.processImuMeas(imu_meas);
-                            static_check_.inputImu(imu_meas);
                             health_monitor_.updateFromImuProp(meas->timestamp_s);
-                            if (static_check_.isStatic()) {
-                                kf_coordiantor_.updateWithZUPT(imu_meas);
-                                health_monitor_.updateFromZupt(meas->timestamp_s);
-                                ROS_WARN_THROTTLE(1, "Static Checked!");
-                                // ROS_WARN("Static Checked!");
+                            if (config_.use_zupt) {
+                                static_check_.inputImu(imu_meas);
+                                if (static_check_.isStatic()) {
+                                    kf_coordiantor_.updateWithZUPT(imu_meas);
+                                    health_monitor_.updateFromZupt(meas->timestamp_s);
+                                    ROS_WARN_THROTTLE(1, "Static Checked!");
+                                    // ROS_WARN("Static Checked!");
+                                }
+                                publishStatic(static_check_.isStatic());
                             }
-                            publishStatic(static_check_.isStatic());
                             break;
                         }
                         case MeasureType::kOdometry: {
-                            if (static_check_.isStatic()) break;
+                            if (config_.use_zupt && static_check_.isStatic()) break;
                             auto odom_meas = std::static_pointer_cast<OdomMeas>(meas);
                             kf_coordiantor_.updateWithOdomMeas(odom_meas);
                             if (config_.use_motion_capture) {
