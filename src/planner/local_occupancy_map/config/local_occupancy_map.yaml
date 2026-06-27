@@ -4,8 +4,8 @@ resolution: 0.20
 map_origin_x: -10.0
 map_origin_y: -10.0
 map_origin_z: -0.01
-map_size_x: 30.0
-map_size_y: 20.0
+map_size_x: 40.0
+map_size_y: 40.0
 map_size_z: 4.0
 
 local_update_range_x: 5.5

@@ -75,6 +75,7 @@ class YopoPlannerNode {
         std::string odom_topic       = "/kf_fusion/kf_imu_odom";
         std::string depth_topic      = "/depth_image";
         std::string ctrl_topic       = "/so3_control/pos_cmd";
+        std::string goal_topic       = "/move_base_simple/goal";
         std::string traj_start_topic = "/traj_start_trigger";
         std::string extrinsic_topic  = "/vins_fusion/extrinsic";
         std::string camera_extrinsic_config;
@@ -83,6 +84,7 @@ class YopoPlannerNode {
         pnh_.param<std::string>("odom_topic", odom_topic, odom_topic);
         pnh_.param<std::string>("depth_topic", depth_topic, depth_topic);
         pnh_.param<std::string>("ctrl_topic", ctrl_topic, ctrl_topic);
+        pnh_.param<std::string>("goal_topic", goal_topic, goal_topic);
         pnh_.param<std::string>("traj_start_topic", traj_start_topic, traj_start_topic);
         pnh_.param<std::string>("extrinsic_topic", extrinsic_topic, extrinsic_topic);
         pnh_.param<std::string>(
@@ -125,8 +127,7 @@ class YopoPlannerNode {
         depth_sub_ = nh_.subscribe(
             depth_topic, 1, &YopoPlannerNode::depthCallback, this,
             ros::TransportHints().tcpNoDelay());
-        goal_sub_ =
-            nh_.subscribe("/move_base_simple/goal", 1, &YopoPlannerNode::goalCallback, this);
+        goal_sub_ = nh_.subscribe(goal_topic, 1, &YopoPlannerNode::goalCallback, this);
         traj_start_sub_ =
             nh_.subscribe(traj_start_topic, 1, &YopoPlannerNode::trajStartCallback, this);
         if (!use_config_camera_extrinsic) {
