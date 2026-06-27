@@ -84,6 +84,37 @@ create_horizontal_pane() {
     tmux select-layout -t "$SESH:" even-horizontal >/dev/null
 }
 
+create_vertical_pane() {
+    local pane_name="$1"
+    local command="$2"
+    local run_mode="${3:-auto}"
+    local pane_id
+
+    pane_id=$(tmux split-window -v -t "$SESH:" -P -F "#{pane_id}")
+    tmux select-pane -t "$pane_id" -T "$pane_name"
+    send_target_command "$pane_id" "$command" "$run_mode"
+    tmux select-layout -t "$SESH:" even-vertical >/dev/null
+}
+
+create_yopo_planner_window() {
+    local top_left_pane_id
+    local top_right_pane_id
+    local bottom_pane_id
+
+    create_window "yopoplaner" "roslaunch yopo_planner yopo_planner.launch" "manual"
+    top_left_pane_id=$(tmux display-message -p -t "$SESH:yopoplaner" "#{pane_id}")
+
+    bottom_pane_id=$(tmux split-window -v -t "$top_left_pane_id" -P -F "#{pane_id}")
+    tmux select-pane -t "$bottom_pane_id" -T "yolo_position"
+    send_target_command "$bottom_pane_id" "roslaunch yolo_trt_detector yolo_trt_detector.launch" "manual"
+
+    top_right_pane_id=$(tmux split-window -h -t "$top_left_pane_id" -P -F "#{pane_id}")
+    tmux select-pane -t "$top_right_pane_id" -T "pubgoal"
+    send_target_command "$top_right_pane_id" "python3 src/planner/yopo_planner/scripts/publish_nav_goal.py" "manual"
+
+    tmux select-pane -t "$top_left_pane_id"
+}
+
 start_mode_windows() {
     case "$MODE" in
         vins)
@@ -104,11 +135,10 @@ start_mode_windows() {
 start_common_windows() {
     create_window "px4ctrl" "roslaunch px4ctrl run_ctrl.launch" "manual"
     create_window "egoplanner" "roslaunch ego_planner single_run_in_exp.launch" "manual"
-    create_window "searchplan" "roslaunch search_plan search_plan.launch" "manual"
+    create_horizontal_pane "searchplan" "roslaunch search_plan search_plan.launch" "manual"
     create_window "takeoff" "bash $WORKSPACE/shfiles/takeoff.sh" "manual"
     create_horizontal_pane "land" "bash $WORKSPACE/shfiles/land.sh" "manual"
-    create_window "yopoplaner" "roslaunch yopo_planner yopo_planner.launch" "manual"
-    create_window "pubgoal" "python3 src/planner/yopo_planner/scripts/publish_nav_goal.py" "manual"
+    create_yopo_planner_window
 }
 
 # 程序启动 #
