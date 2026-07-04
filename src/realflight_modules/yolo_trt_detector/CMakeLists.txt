@@ -16,6 +16,14 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge_454
 )
 
+if(EXISTS "/usr/local/include/tensorrt")
+    message(STATUS "tensorrt include directory: /usr/local/include/tensorrt")
+    link_directories(/usr/local/tensorrt/lib)
+    include_directories(/usr/local/include/tensorrt)
+else()
+    message(STATUS "external path for tensorrt not found")
+endif()
+
 set(OpenCV_DIR /usr/local/opencv-4.5.4/lib/cmake/opencv4)
 find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
