@@ -11,12 +11,13 @@ find_package(Eigen3 REQUIRED)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
+  nav_msgs
   geometry_msgs
   traj_utils
 )
 
 catkin_package(
- CATKIN_DEPENDS traj_utils
+ CATKIN_DEPENDS roscpp std_msgs nav_msgs geometry_msgs traj_utils
 )
 
 include_directories(
@@ -28,8 +29,10 @@ include_directories(
 add_executable(bridge_node
   src/bridge_node.cpp 
   )
+
+add_dependencies(bridge_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
 target_link_libraries(bridge_node 
   ${catkin_LIBRARIES}
   )
-
 

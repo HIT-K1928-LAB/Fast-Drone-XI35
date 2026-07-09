@@ -1,0 +1,10 @@
+<launch>
+  <arg name="config_file" default="$(find yopo_planner)/config/yopo_planner_sim.yaml"/>
+  <arg name="odom_topic" default="/sim/odom"/>
+  <arg name="depth_topic" default="/depth_image"/>
+  <arg name="ctrl_topic" default="/so3_control/pos_cmd"/>
+
+  <node name="yopo_planner_node" pkg="yopo_planner" type="yopo_planner_node" output="screen">
+    <rosparam command="load" file="$(arg config_file)" subst_value="true"/>
+  </node>
+</launch>

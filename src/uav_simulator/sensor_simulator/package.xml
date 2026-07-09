@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<package format="2">
+    <name>sensor_simulator</name>
+    <version>0.0.1</version>
+    <description>CUDA/CPU depth and lidar sensor simulator for YOPO simulation.</description>
+
+    <maintainer email="your_email@example.com">Your Name</maintainer>
+    <license>BSD</license>
+
+    <buildtool_depend>catkin</buildtool_depend>
+
+    <build_depend>roscpp</build_depend>
+    <build_depend>cv_bridge</build_depend>
+    <build_depend>nav_msgs</build_depend>
+    <build_depend>pcl_conversions</build_depend>
+    <build_depend>pcl_ros</build_depend>
+    <build_depend>sensor_msgs</build_depend>
+    <build_depend>std_msgs</build_depend>
+
+    <exec_depend>roscpp</exec_depend>
+    <exec_depend>cv_bridge</exec_depend>
+    <exec_depend>nav_msgs</exec_depend>
+    <exec_depend>pcl_conversions</exec_depend>
+    <exec_depend>pcl_ros</exec_depend>
+    <exec_depend>sensor_msgs</exec_depend>
+    <exec_depend>std_msgs</exec_depend>
+
+    <build_depend>eigen</build_depend>
+    <exec_depend>eigen</exec_depend>
+    <build_depend>yaml-cpp</build_depend>
+    <exec_depend>yaml-cpp</exec_depend>
+
+    <export/>
+</package>

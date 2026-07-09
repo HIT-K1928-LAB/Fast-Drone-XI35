@@ -28,17 +28,9 @@ int main(int argc, char *argv[]) {
     ros::Subscriber extended_state_sub = nh.subscribe<mavros_msgs::ExtendedState>(
         "/mavros/extended_state", 10,
         boost::bind(&ExtendedState_Data_t::feed, &fsm.extended_state_data, _1));
-    ros::Subscriber odom_sub;
-    if (param.use_motion_capture_odom) {
-        odom_sub = nh.subscribe<nav_msgs::Odometry>(
-            "/motion_capture/motion_capture_odom", 100,
-            boost::bind(&Odom_Data_t::feed, &fsm.odom_data, _1), ros::VoidConstPtr(),
-            ros::TransportHints().tcpNoDelay());
-    } else {
-        odom_sub = nh.subscribe<nav_msgs::Odometry>(
-            "odom", 100, boost::bind(&Odom_Data_t::feed, &fsm.odom_data, _1), ros::VoidConstPtr(),
-            ros::TransportHints().tcpNoDelay());
-    }
+    ros::Subscriber odom_sub = nh.subscribe<nav_msgs::Odometry>(
+        "odom", 100, boost::bind(&Odom_Data_t::feed, &fsm.odom_data, _1), ros::VoidConstPtr(),
+        ros::TransportHints().tcpNoDelay());
 
     ros::Subscriber cmd_sub = nh.subscribe<quadrotor_msgs::PositionCommand>(
         "cmd", 100, boost::bind(&Command_Data_t::feed, &fsm.cmd_data, _1), ros::VoidConstPtr(),
@@ -84,6 +76,26 @@ int main(int argc, char *argv[]) {
     if (fsm.set_bat_freq.call(srv)) {
         ROS_INFO(
             "set bat message frequent %fHz result: %d", srv.request.message_rate,
+            srv.response.success);
+    } else {
+        ROS_ERROR("Failed to call /mavros/set_message_interval");
+    }
+
+    srv.request.message_id   = param.mavros_attitude_id;          // ATTITUDE
+    srv.request.message_rate = param.mavros_attitude_msg_freq;    // 200Hz
+    if (fsm.set_bat_freq.call(srv)) {
+        ROS_INFO(
+            "set attitude message frequent %fHz result: %d", srv.request.message_rate,
+            srv.response.success);
+    } else {
+        ROS_ERROR("Failed to call /mavros/set_message_interval");
+    }
+
+    srv.request.message_id   = param.mavros_highres_imu_id;          // HIGHRES_IMU
+    srv.request.message_rate = param.mavros_highres_imu_msg_freq;    // 1000Hz
+    if (fsm.set_bat_freq.call(srv)) {
+        ROS_INFO(
+            "set highres imu message frequent %fHz result: %d", srv.request.message_rate,
             srv.response.success);
     } else {
         ROS_ERROR("Failed to call /mavros/set_message_interval");

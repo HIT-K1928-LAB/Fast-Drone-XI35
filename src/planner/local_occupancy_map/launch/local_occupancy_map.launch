@@ -1,0 +1,37 @@
+<launch>
+  <arg name="depth_topic" default="/camera/depth/image_rect_raw"/>
+  <arg name="odom_topic" default="/kf_fusion/kf_imu_odom"/>
+  <arg name="config_file" default="$(find local_occupancy_map)/config/local_occupancy_map.yaml"/>
+  <arg name="camera_extrinsic_config" default="$(find vins)/../config/fast_drone_250.yaml"/>
+  <arg name="camera_extrinsic_key" default="body_T_cam0"/>
+  <arg name="map_origin_x" default="-10.0"/>
+  <arg name="map_origin_y" default="-10.0"/>
+  <arg name="map_origin_z" default="-0.01"/>
+  <arg name="map_size_x" default="30.0"/>
+  <arg name="map_size_y" default="20.0"/>
+  <arg name="map_size_z" default="4.0"/>
+  <arg name="rviz" default="false"/>
+
+  <node pkg="local_occupancy_map"
+        type="local_occupancy_map_node"
+        name="local_occupancy_map"
+        output="screen">
+    <rosparam command="load" file="$(arg config_file)"/>
+    <param name="map_origin_x" value="$(arg map_origin_x)"/>
+    <param name="map_origin_y" value="$(arg map_origin_y)"/>
+    <param name="map_origin_z" value="$(arg map_origin_z)"/>
+    <param name="map_size_x" value="$(arg map_size_x)"/>
+    <param name="map_size_y" value="$(arg map_size_y)"/>
+    <param name="map_size_z" value="$(arg map_size_z)"/>
+    <param name="camera_extrinsic_config" value="$(arg camera_extrinsic_config)"/>
+    <param name="camera_extrinsic_key" value="$(arg camera_extrinsic_key)"/>
+    <remap from="~depth" to="$(arg depth_topic)"/>
+    <remap from="~odom" to="$(arg odom_topic)"/>
+  </node>
+
+  <node if="$(arg rviz)"
+        name="local_occupancy_map_rviz"
+        pkg="rviz"
+        type="rviz"
+        args="-d $(find local_occupancy_map)/rviz/local_occupancy_map.rviz"/>
+</launch>

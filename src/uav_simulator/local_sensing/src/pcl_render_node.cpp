@@ -70,7 +70,7 @@ Matrix4d cam2world;
 Eigen::Quaterniond cam2world_quat;
 nav_msgs::Odometry _odom;
 
-double sensing_horizon, sensing_rate, estimation_rate; 
+double sensing_horizon, sensing_rate, estimation_rate;
 double _x_size, _y_size, _z_size;
 double _gl_xl, _gl_yl, _gl_zl;
 double _resolution, _inv_resolution;
@@ -82,7 +82,7 @@ Eigen::Vector3d last_pose_world;
 void render_currentpose();
 void render_pcl_world();
 
-inline Eigen::Vector3d gridIndex2coord(const Eigen::Vector3i & index) 
+inline Eigen::Vector3d gridIndex2coord(const Eigen::Vector3i & index)
 {
     Eigen::Vector3d pt;
     pt(0) = ((double)index(0) + 0.5) * _resolution + _gl_xl;
@@ -97,8 +97,8 @@ inline Eigen::Vector3i coord2gridIndex(const Eigen::Vector3d & pt)
     Eigen::Vector3i idx;
     idx(0) = std::min( std::max( int( (pt(0) - _gl_xl) * _inv_resolution), 0), _GLX_SIZE - 1);
     idx(1) = std::min( std::max( int( (pt(1) - _gl_yl) * _inv_resolution), 0), _GLY_SIZE - 1);
-    idx(2) = std::min( std::max( int( (pt(2) - _gl_zl) * _inv_resolution), 0), _GLZ_SIZE - 1);              
-  
+    idx(2) = std::min( std::max( int( (pt(2) - _gl_zl) * _inv_resolution), 0), _GLZ_SIZE - 1);
+
     return idx;
 };
 
@@ -144,7 +144,7 @@ void rcvOdometryCallbck(const nav_msgs::Odometry& odom)
 }
 
 void pubCameraPose(const ros::TimerEvent & event)
-{ 
+{
   //cout<<"pub cam pose"
   geometry_msgs::PoseStamped camera_pose;
   camera_pose.header = _odom.header;
@@ -160,10 +160,10 @@ void pubCameraPose(const ros::TimerEvent & event)
 }
 
 void renderSensedPoints(const ros::TimerEvent & event)
-{ 
+{
   //if(! has_global_map || ! has_odom) return;
   if( !has_global_map && !has_local_map) return;
-  
+
   if( !has_odom ) return;
   render_currentpose();
   render_pcl_world();
@@ -234,19 +234,19 @@ void render_pcl_world()
   for(int u = 0; u < width; u++)
     for(int v = 0; v < height; v++){
       float depth = depth_mat.at<float>(v,u);
-      
+
       if(depth == 0.0)
         continue;
 
       pose_in_camera(0) = (u - cx) * depth / fx;
       pose_in_camera(1) = (v - cy) * depth / fy;
-      pose_in_camera(2) = depth; 
+      pose_in_camera(2) = depth;
       pose_in_camera(3) = 1.0;
-      
+
       pose_in_world = cam2world * pose_in_camera;
 
       if( (pose_in_world.segment(0,3) - last_pose_world).norm() > sensing_horizon )
-          continue; 
+          continue;
 
       pose_pt = pose_in_world.head(3);
       //pose_pt = gridIndex2coord(coord2gridIndex(pose_pt));
@@ -280,20 +280,30 @@ void render_currentpose()
     for(int j = 0; j < 4; j ++)
       pose[j + 4 * i] = cam_pose(i, j);
 
-  depthrender.render_pose(pose, depth_hostptr);
+  try {
+    depthrender.render_pose(pose, depth_hostptr);
+  } catch (const std::exception& e) {
+    ROS_ERROR_THROTTLE(1.0, "CUDA depth render failed: %s", e.what());
+    return;
+  }
   //depthrender.render_pose(cam_pose, depth_hostptr);
 
   depth_mat = cv::Mat::zeros(height, width, CV_32FC1);
   double min = 0.5;
   double max = 1.0f;
+  int valid_depth_count = 0;
   for(int i = 0; i < height; i++)
   	for(int j = 0; j < width; j++)
   	{
   		float depth = (float)depth_hostptr[i * width + j] / 1000.0f;
   		depth = depth < 500.0f ? depth : 0;
+      if (depth > 0.0f) ++valid_depth_count;
   		max = depth > max ? depth : max;
   		depth_mat.at<float>(i,j) = depth;
   	}
+  if (valid_depth_count == 0) {
+    ROS_WARN_THROTTLE(1.0, "CUDA depth render produced no valid pixels");
+  }
   //ROS_INFO("render cost %lf ms.", (ros::Time::now().toSec() - this_time) * 1000.0f);
   //printf("max_depth %lf.\n", max);
 
@@ -352,9 +362,9 @@ int main(int argc, char **argv)
   //init cam2world transformation
   cam2world = Matrix4d::Identity();
   //subscribe point cloud
-  global_map_sub = nh.subscribe( "global_map", 1,  rcvGlobalPointCloudCallBack);  
-  local_map_sub  = nh.subscribe( "local_map",  1,  rcvLocalPointCloudCallBack);  
-  odom_sub       = nh.subscribe( "odometry",   50, rcvOdometryCallbck   );  
+  global_map_sub = nh.subscribe( "global_map", 1,  rcvGlobalPointCloudCallBack);
+  local_map_sub  = nh.subscribe( "local_map",  1,  rcvLocalPointCloudCallBack);
+  odom_sub       = nh.subscribe( "odometry",   50, rcvOdometryCallbck   );
 
   //publisher depth image and color image
   pub_depth = nh.advertise<sensor_msgs::Image>("depth",1000);
@@ -374,17 +384,17 @@ int main(int argc, char **argv)
   _gl_xl = -_x_size/2.0;
   _gl_yl = -_y_size/2.0;
   _gl_zl =   0.0;
-  
+
   _GLX_SIZE = (int)(_x_size * _inv_resolution);
   _GLY_SIZE = (int)(_y_size * _inv_resolution);
   _GLZ_SIZE = (int)(_z_size * _inv_resolution);
 
   ros::Rate rate(100);
   bool status = ros::ok();
-  while(status) 
+  while(status)
   {
-    ros::spinOnce();  
+    ros::spinOnce();
     status = ros::ok();
     rate.sleep();
-  } 
+  }
 }

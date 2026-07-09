@@ -1,0 +1,42 @@
+frame_id: world
+
+resolution: 0.20
+map_origin_x: -10.0
+map_origin_y: -10.0
+map_origin_z: -0.01
+map_size_x: 40.0
+map_size_y: 40.0
+map_size_z: 4.0
+
+local_update_range_x: 5.5
+local_update_range_y: 5.5
+local_update_range_z: 4.5
+local_map_margin: 10
+ground_height: -0.01
+visualization_truncate_height: 3.0
+
+fx: 387.229248046875
+fy: 387.229248046875
+cx: 321.04638671875
+cy: 243.44969177246094
+k_depth_scaling_factor: 1000.0
+skip_pixel: 2
+
+use_depth_filter: true
+depth_filter_tolerance: 0.15
+depth_filter_mindist: 0.2
+depth_filter_maxdist: 5.0
+depth_filter_margin: 2
+min_ray_length: 0.3
+max_ray_length: 5.0
+
+obstacles_inflation: 0.12
+
+p_hit: 0.65
+p_miss: 0.35
+p_min: 0.12
+p_max: 0.90
+p_occ: 0.80
+
+update_rate: 20.0
+publish_rate: 2.0

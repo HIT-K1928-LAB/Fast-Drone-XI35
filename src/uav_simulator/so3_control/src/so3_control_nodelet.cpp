@@ -9,6 +9,9 @@
 #include <so3_control/SO3Control.h>
 #include <std_msgs/Bool.h>
 #include <tf/transform_datatypes.h>
+#include <string>
+#include <iostream>
+#include <fstream>
 
 class SO3ControlNodelet : public nodelet::Nodelet
 {
@@ -38,6 +41,9 @@ private:
   void corrections_callback(const quadrotor_msgs::Corrections::ConstPtr& msg);
   void imu_callback(const sensor_msgs::Imu& imu);
 
+  void initLogRecorder();
+  void recordLog();
+
   SO3Control      controller_;
   ros::Publisher  so3_command_pub_;
   ros::Subscriber odom_sub_;
@@ -49,13 +55,19 @@ private:
   bool        position_cmd_updated_, position_cmd_init_;
   std::string frame_id_;
 
+  bool record_log_{false};
+  bool cur_acc_init_{false}, cur_odom_init_{false};
   Eigen::Vector3d des_pos_, des_vel_, des_acc_, kx_, kv_;
+  Eigen::Vector3d cur_pos_, cur_vel_, cur_acc_;
   double          des_yaw_, des_yaw_dot_;
   double          current_yaw_;
   bool            enable_motors_;
   bool            use_external_yaw_;
   double          kR_[3], kOm_[3], corrections_[3];
   double          init_x_, init_y_, init_z_;
+
+  std::ofstream logger;
+  std::string logger_file_name;
 };
 
 void
@@ -116,6 +128,12 @@ SO3ControlNodelet::position_cmd_callback(
   position_cmd_init_    = true;
 
   publishSO3Command();
+
+  if (record_log_ && cur_acc_init_ && cur_odom_init_)
+  {
+    recordLog();
+  }
+  
 }
 
 void
@@ -128,7 +146,10 @@ SO3ControlNodelet::odom_callback(const nav_msgs::Odometry::ConstPtr& odom)
                                  odom->twist.twist.linear.y,
                                  odom->twist.twist.linear.z);
 
+  cur_odom_init_ = true;
   current_yaw_ = tf::getYaw(odom->pose.pose.orientation);
+  cur_pos_ = position;
+  cur_vel_ = velocity;
 
   controller_.setPosition(position);
   controller_.setVelocity(velocity);
@@ -178,9 +199,11 @@ SO3ControlNodelet::corrections_callback(
 void
 SO3ControlNodelet::imu_callback(const sensor_msgs::Imu& imu)
 {
+  cur_acc_init_ = true;
   const Eigen::Vector3d acc(imu.linear_acceleration.x,
                             imu.linear_acceleration.y,
                             imu.linear_acceleration.z);
+  cur_acc_ = acc;
   controller_.setAcc(acc);
 }
 
@@ -196,7 +219,9 @@ SO3ControlNodelet::onInit(void)
   double mass;
   n.param("mass", mass, 0.5);
   controller_.setMass(mass);
-
+  
+  n.param("record_log", record_log_, false);
+  n.param("PID_logger_file_name", logger_file_name, std::string("/home/lu/"));
   n.param("use_external_yaw", use_external_yaw_, true);
 
   n.param("gains/rot/x", kR_[0], 1.5);
@@ -237,6 +262,86 @@ SO3ControlNodelet::onInit(void)
 
   imu_sub_ = n.subscribe("imu", 10, &SO3ControlNodelet::imu_callback, this,
                          ros::TransportHints().tcpNoDelay());
+  
+  if (record_log_)
+    initLogRecorder();
+  
+}
+
+void SO3ControlNodelet::initLogRecorder()
+{
+  std::cout << "logger_file_name: " << logger_file_name << std::endl;
+  std::string temp_file_name = logger_file_name + "PID_logger_";
+  time_t timep;
+  timep = time(0);
+  char tmp[64];
+  strftime(tmp, sizeof(tmp), "%Y_%m_%d_%H_%M_%S", localtime(&timep));
+  temp_file_name += tmp;
+  temp_file_name += ".csv";
+  if (logger.is_open())
+  {
+    logger.close();
+  }
+  logger.open(temp_file_name.c_str(), std::ios::out);
+  std::cout << "PID logger: " << temp_file_name << std::endl;
+  if (!logger.is_open())
+  {
+    std::cout << "cannot open the logger." << std::endl;
+  }
+  else
+  {
+    logger << "timestamp" << ',';
+    logger << "cur_x" << ',';
+    logger << "cur_y" << ',';
+    logger << "cur_z" << ',';
+    logger << "cur_vx" << ',';
+    logger << "cur_vy" << ',';
+    logger << "cur_vz" << ',';
+    logger << "cur_ax" << ',';
+    logger << "cur_ay" << ',';
+    logger << "cur_az" << ',';
+    logger << "not_use" << ',';
+    logger << "not_use" << ',';
+    logger << "cur_yaw" << ',';
+    logger << "des_yaw" << ',';
+    logger << "des_pos_x" << ',';
+    logger << "des_pos_y" << ',';
+    logger << "des_pos_z" << ',';
+    logger << "des_vel_x" << ',';
+    logger << "des_vel_y" << ',';
+    logger << "des_vel_z" << ',';
+    logger << "des_acc_x" << ',';
+    logger << "des_acc_y" << ',';
+    logger << "des_acc_z" << std::endl;
+  }
+}
+void SO3ControlNodelet::recordLog(){
+  if (logger.is_open())
+  {
+    logger << ros::Time::now().toNSec() << ',';
+    logger << cur_pos_(0) << ',';
+    logger << cur_pos_(1) << ',';
+    logger << cur_pos_(2) << ',';
+    logger << cur_vel_(0) << ',';
+    logger << cur_vel_(1) << ',';
+    logger << cur_vel_(2) << ',';
+    logger << cur_acc_(0) << ',';
+    logger << cur_acc_(1) << ',';
+    logger << cur_acc_(2) << ',';
+    logger << 0.0 << ',';
+    logger << 0.0 << ',';
+    logger << current_yaw_ << ',';
+    logger << des_yaw_ << ',';
+    logger << des_pos_(0) << ',';
+    logger << des_pos_(1) << ',';
+    logger << des_pos_(2) << ',';
+    logger << des_vel_(0) << ',';
+    logger << des_vel_(1) << ',';
+    logger << des_vel_(2) << ',';
+    logger << des_acc_(0) << ',';
+    logger << des_acc_(1) << ',';
+    logger << des_acc_(2) << std::endl;
+  }
 }
 
 #include <pluginlib/class_list_macros.h>

@@ -121,7 +121,7 @@ void RC_Data_t::check_validity() {
     }
 }
 
-bool RC_Data_t::check_centered() {
+bool RC_Data_t::check_centered() const {
     bool centered =
         abs(ch[0]) < 1e-5 && abs(ch[1]) < 1e-5 && abs(ch[2]) < 1e-5 && abs(ch[3]) < 1e-5;
     return centered;
@@ -248,9 +248,12 @@ void Battery_Data_t::feed(sensor_msgs::BatteryStateConstPtr pMsg) {
     msg       = *pMsg;
     rcv_stamp = ros::Time::now();
 
-    double voltage = 0;
-    for (size_t i = 0; i < pMsg->cell_voltage.size(); ++i) {
-        voltage += pMsg->cell_voltage[i];
+    double voltage = pMsg->voltage;
+    if (pMsg->cell_voltage.size() > 1) {
+        voltage = 0;
+        for (size_t i = 0; i < pMsg->cell_voltage.size(); ++i) {
+            voltage += pMsg->cell_voltage[i];
+        }
     }
     if (!lpf_init) {
         volt     = voltage;
@@ -262,17 +265,14 @@ void Battery_Data_t::feed(sensor_msgs::BatteryStateConstPtr pMsg) {
     // volt = 0.8 * volt + 0.2 * pMsg->voltage; // Naive LPF
     percentage = pMsg->percentage;
 
-    static ros::Time last_print_t = ros::Time(0);
-    if (percentage > 0.05) {
-        if ((rcv_stamp - last_print_t).toSec() > 10) {
-            ROS_INFO("[px4ctrl] Voltage=%.3f, percentage=%.3f", volt, percentage);
-            last_print_t = rcv_stamp;
-        }
+    if (percentage > 0.1) {
+        ROS_INFO_THROTTLE(
+            10.0, "[px4ctrl] voltage=%.3f, cell_voltage=%.3f, percentage=%.3f", volt, volt / 4.0,
+            percentage);
     } else {
-        if ((rcv_stamp - last_print_t).toSec() > 1) {
-            // ROS_ERROR("[px4ctrl] Dangerous! voltage=%.3f, percentage=%.3f", volt, percentage);
-            last_print_t = rcv_stamp;
-        }
+        ROS_ERROR_THROTTLE(
+            1.0, "[px4ctrl] Low Voltage! voltage=%.3f, cell_voltage=%.3f, percentage=%.3f", volt,
+            volt / 4.0, percentage);
     }
 }
 

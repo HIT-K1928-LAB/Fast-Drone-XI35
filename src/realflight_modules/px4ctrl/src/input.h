@@ -42,9 +42,9 @@ class RC_Data_t {
 
     RC_Data_t();
     void check_validity();
-    bool check_centered();
+    bool check_centered() const;
     void feed(mavros_msgs::RCInConstPtr pMsg);
-    bool is_received(const ros::Time &now_time);
+    bool is_received(const ros::Time &now_time) const;
 };
 
 class Odom_Data_t {

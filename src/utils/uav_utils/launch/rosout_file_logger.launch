@@ -1,0 +1,17 @@
+<launch>
+  <arg name="flush_period" default="0.5"/>
+  <arg name="max_queue_size" default="10000"/>
+  <arg name="max_batch_size" default="1000"/>
+  <arg name="flush_streams" default="true"/>
+  <arg name="include_node_name" default="false"/>
+  <arg name="include_location" default="false"/>
+
+  <node pkg="uav_utils" type="rosout_file_logger" name="rosout_file_logger" output="screen">
+    <param name="flush_period" value="$(arg flush_period)"/>
+    <param name="max_queue_size" value="$(arg max_queue_size)"/>
+    <param name="max_batch_size" value="$(arg max_batch_size)"/>
+    <param name="flush_streams" value="$(arg flush_streams)"/>
+    <param name="include_node_name" value="$(arg include_node_name)"/>
+    <param name="include_location" value="$(arg include_location)"/>
+  </node>
+</launch>

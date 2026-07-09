@@ -1,4 +1,20 @@
 #include "depth_render.cuh"
+
+namespace {
+
+void checkCudaLaunch(const char* label)
+{
+  cudaError err = cudaGetLastError();
+  if(err != cudaSuccess)
+    throw CudaException(label, err);
+
+  err = cudaDeviceSynchronize();
+  if(err != cudaSuccess)
+    throw CudaException(label, err);
+}
+
+} // namespace
+
 __global__ void render(float3 *data_devptr, Parameter *para_devptr, DeviceImage<int> *depth_devptr)
 {
 	const int index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -147,12 +163,14 @@ void DepthRender::set_data(vector<float> &cloud_data)
   depth_grid.x = (parameter.width + depth_block.x - 1 ) / depth_block.x;
   depth_grid.y = (parameter.height + depth_block.y - 1 ) / depth_block.y;
   depth_initial<<<depth_grid, depth_block>>>(depth_output.dev_ptr);
+  checkCudaLaunch("depth_initial kernel failed");
 
   dim3 render_block;
   dim3 render_grid;
   render_block.x = 64;
   render_grid.x = (cloud_size + render_block.x - 1) / render_block.x;
   render<<<render_grid, render_block>>>(dev_cloud_ptr, parameter_devptr, depth_output.dev_ptr);
+  checkCudaLaunch("render kernel failed");
 
 	depth_output.getDevData(host_ptr);
 }
@@ -186,12 +204,14 @@ void DepthRender::render_pose( double * transformation, int *host_ptr)
   depth_grid.x = (parameter.width + depth_block.x - 1 ) / depth_block.x;
   depth_grid.y = (parameter.height + depth_block.y - 1 ) / depth_block.y;
   depth_initial<<<depth_grid, depth_block>>>(depth_output.dev_ptr);
+  checkCudaLaunch("depth_initial kernel failed");
 
   dim3 render_block;
   dim3 render_grid;
   render_block.x = 64;
   render_grid.x = (cloud_size + render_block.x - 1) / render_block.x;
   render<<<render_grid, render_block>>>(dev_cloud_ptr, parameter_devptr, depth_output.dev_ptr);
+  checkCudaLaunch("render kernel failed");
 
 	depth_output.getDevData(host_ptr);
 }

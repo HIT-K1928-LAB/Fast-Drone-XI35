@@ -13,18 +13,15 @@
 // #include "ThrustCurve.h"
 #include "controller.h"
 
-struct AutoTakeoffLand_t {
+struct TakeoffLandContext {
     bool landed{true};
-    ros::Time toggle_takeoff_land_time;
-    std::pair<bool, ros::Time> delay_trigger{std::pair<bool, ros::Time>(false, ros::Time(0))};
+    ros::Time command_time;
+    std::pair<bool, ros::Time> delayed_trigger{false, ros::Time(0)};
     Eigen::Vector4d start_pose;
 
-    static constexpr double MOTORS_SPEEDUP_TIME =
-        3.0;  // motors idle running for 3 seconds before takeoff
-    static constexpr double TAKEOFF_SPEEDUP_TIME =
-        0.1;  // Time to speed up during takeoff font stage
-    static constexpr double DELAY_TRIGGER_TIME =
-        2.0;  // Time to be delayed when reach at target height
+    static constexpr double MOTORS_SPEEDUP_TIME  = 3.0;
+    static constexpr double TAKEOFF_SPEEDUP_TIME = 0.1;
+    static constexpr double DELAY_TRIGGER_TIME   = 2.0;
 };
 
 class PX4CtrlFSM {
@@ -38,7 +35,7 @@ class PX4CtrlFSM {
     Imu_Data_t imu_data;
     Command_Data_t cmd_data;
     Battery_Data_t bat_data;
-    Takeoff_Land_Data_t takeoff_land_data;
+    Takeoff_Land_Data_t takeoff_land_data;  // 外部收到的起飞/降落命令
 
     Eigen::Vector3d imu_acc_lpf;  // output of LPF
     bool flag_init_imu_acc_lpf;
@@ -70,24 +67,24 @@ class PX4CtrlFSM {
     };
 
     PX4CtrlFSM(Parameter_t &, LinearControl &);
+
     void process();
-    void process_new();
-    bool rc_is_received(const ros::Time &now_time);
-    bool cmd_is_received(const ros::Time &now_time);
-    bool odom_is_received(const ros::Time &now_time);
-    bool imu_is_received(const ros::Time &now_time);
-    bool bat_is_received(const ros::Time &now_time);
+
+    bool rc_is_received(const ros::Time &now_time) const;
+    bool cmd_is_received(const ros::Time &now_time) const;
+    bool odom_is_received(const ros::Time &now_time) const;
+    bool imu_is_received(const ros::Time &now_time) const;
+    bool bat_is_received(const ros::Time &now_time) const;
     bool recv_new_odom();
     State_t get_state() { return state; }
-    bool get_landed() { return takeoff_land.landed; }
+    bool get_landed() const { return takeoff_land_ctx.landed; }
 
     void LPF_imu_a(Eigen::Vector3d &imu_data_acc);
 
     // add by bk
     bool emergency_hover = false;
     void emergency_callback(const std_msgs::BoolConstPtr &msg) {
-        // if(msg->data == true)
-        // 	emergency_hover = true;
+        if (msg->data == true) emergency_hover = true;
     }
 
     bool search_hover = false;
@@ -99,8 +96,50 @@ class PX4CtrlFSM {
     }
 
   private:
+    // refactor begin
     State_t state;  // Should only be changed in PX4CtrlFSM::process() function!
-    AutoTakeoffLand_t takeoff_land;
+    TakeoffLandContext takeoff_land_ctx;  // FSM 内部自动起降上下文
+
+    // ---- state handlers ----
+    void handleManualCtrl(const ros::Time &now_time, Desired_State_t &des);
+    void handleAutoHover(const ros::Time &now_time, Desired_State_t &des);
+    void handleCmdCtrl(const ros::Time &now_time, Desired_State_t &des);
+    void handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &des);
+    void handleAutoLand(
+        const ros::Time &now_time, Desired_State_t &des, bool &rotor_low_speed_during_land);
+
+    // ---- event predicates ----
+    bool takeoffRequested() const;
+    bool landRequested() const;
+    bool hoverSwitchTriggered() const;
+    bool commandSwitchEnabled() const;
+    bool commandSwitchTriggered() const;
+
+    // ---- guards ----
+    bool canEnterAutoHover(const ros::Time &now_time) const;
+    bool canEnterAutoTakeoff(const ros::Time &now_time) const;
+    bool canEnterCmdCtrl(const ros::Time &now_time) const;
+    bool canUsePlannerCommand(const ros::Time &now_time) const;
+    bool isOnGroundForTakeoff() const;
+    bool canAutoTakeoffFromHover() const;
+
+    // ---- transition attempts ----
+    bool tryEnterAutoTakeoff(const ros::Time &now_time);
+    bool tryEnterAutoHover(const ros::Time &now_time);
+    bool tryEnterCmdCtrl(const ros::Time &now_time, Desired_State_t &des);
+    bool tryEnterAutoLand(const ros::Time &now_time);
+    bool tryFallbackToManual(const ros::Time &now_time);
+    bool tryFallbackCmdToHover(const ros::Time &now_time, Desired_State_t &des);
+    bool tryRebootFcu();
+
+    // ---- transition actions ----
+    bool enterManualFromOffboard();
+    bool enterAutoHover();
+    bool enterAutoTakeoff(const ros::Time &now_time);
+    void enterCmdCtrl(Desired_State_t &des);
+    void enterAutoLand();
+
+    // refactor end
 
     // ---- control related ----
     Desired_State_t get_hover_des();

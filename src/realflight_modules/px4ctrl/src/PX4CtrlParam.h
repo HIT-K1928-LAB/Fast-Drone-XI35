@@ -67,11 +67,13 @@ class Parameter_t {
     bool use_bodyrate_ctrl;
     // bool print_dbg;
 
-    bool use_motion_capture_odom;
-
     // mavros params
     int mavros_battery_id;
     float mavros_bat_msg_freq;
+    int mavros_attitude_id;
+    float mavros_attitude_msg_freq;
+    int mavros_highres_imu_id;
+    float mavros_highres_imu_msg_freq;
 
     Parameter_t();
     void config_from_ros_handle(const ros::NodeHandle &nh);

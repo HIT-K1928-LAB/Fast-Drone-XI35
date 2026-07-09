@@ -4,6 +4,55 @@ Provide some widely used utilities in uav development. **No library. Only header
 
 Dependency: Eigen
 
+## rosout_file_logger
+
+Record `/rosout_agg` messages into per-node files under a timestamped
+subdirectory in the current ROS log directory:
+
+```bash
+rosrun uav_utils rosout_file_logger
+```
+
+or:
+
+```bash
+roslaunch uav_utils rosout_file_logger.launch
+```
+
+Each logger run creates a new directory named by the logger node start time,
+with second precision. Each ROS node gets its own file in that directory, for
+example:
+
+```text
+2026-06-04_14-40-58/vins_fusion.log
+2026-06-04_14-40-58/px4ctrl.log
+```
+
+The line format is:
+
+```text
+[INFO] [2026-06-04 14:40:58.826229647] [/vins_fusion] [rosNodeTest.cpp:main:197] waiting for image and imu...
+```
+
+The logger records all `/rosout_agg` levels after it starts: `DEBUG`, `INFO`,
+`WARN`, `ERROR`, and `FATAL`.
+
+The callback only pushes messages into an in-memory queue. A timer writes queued
+messages to disk in batches to avoid flushing on every ROS log message. Runtime
+parameters:
+
+```bash
+rosrun uav_utils rosout_file_logger _flush_period:=0.5 _max_queue_size:=10000 _max_batch_size:=1000 _flush_streams:=true _include_node_name:=true _include_location:=true
+roslaunch uav_utils rosout_file_logger.launch flush_period:=0.5 max_queue_size:=10000 max_batch_size:=1000 flush_streams:=true include_node_name:=true include_location:=true
+```
+
+- `flush_period`: seconds between batch writes.
+- `max_queue_size`: maximum buffered log lines; oldest lines are dropped when full.
+- `max_batch_size`: maximum lines written per timer tick.
+- `flush_streams`: whether to flush file streams after each batch.
+- `include_node_name`: whether each line includes the ROS node name, such as `[/vins_fusion]`.
+- `include_location`: whether each line includes source location, such as `[rosNodeTest.cpp:main:197]`.
+
 This package is deliberately designed not to find Eigen automatically, because there are many cases that you would like to use your own Eigen instead of that in the system directory (**/usr/include/eigen3**).
 
 ### How to resolve "fatal error: Eigen/Dense: No such file or directory" problem
