@@ -132,6 +132,31 @@ start_mode_windows() {
     esac
 }
 
+create_yolo_ego_planner_window() {
+    local top_left_pane_id
+    local top_right_pane_id
+    local bottom_left_pane_id
+    local bottom_right_pane_id
+
+    create_window "yolo_ego_planner" "roslaunch ego_planner single_run_in_exp.launch" "manual"
+    top_left_pane_id=$(tmux display-message -p -t "$SESH:yolo_ego_planner" "#{pane_id}")
+
+    top_right_pane_id=$(tmux split-window -h -t "$top_left_pane_id" -P -F "#{pane_id}")
+    tmux select-pane -t "$top_right_pane_id" -T "pubgoal"
+    send_target_command "$top_right_pane_id" "python3 /root/Fast-Drone-XI35/src/planner/plan_manage/scripts/publish_nav_goal.py" "manual"
+
+    bottom_left_pane_id=$(tmux split-window -v -t "$top_left_pane_id" -P -F "#{pane_id}")
+    tmux select-pane -t "$bottom_left_pane_id" -T "yolo_position"
+    send_target_command "$bottom_left_pane_id" "roslaunch yolo_trt_detector yolo_trt_detector.launch" "manual"
+
+    bottom_right_pane_id=$(tmux split-window -v -t "$top_right_pane_id" -P -F "#{pane_id}")
+    tmux select-pane -t "$bottom_right_pane_id" -T "yolo_ego_gate"
+    send_target_command "$bottom_right_pane_id" "roslaunch search_plan yolo_ego_target_gate.launch" "manual"
+
+    tmux select-layout -t "$SESH:yolo_ego_planner" tiled >/dev/null
+    tmux select-pane -t "$top_left_pane_id"
+}
+
 start_common_windows() {
     create_window "px4ctrl" "roslaunch px4ctrl run_ctrl.launch" "manual"
     create_window "egoplanner" "roslaunch ego_planner single_run_in_exp.launch" "manual"
@@ -139,6 +164,7 @@ start_common_windows() {
     create_window "takeoff" "bash $WORKSPACE/shfiles/takeoff.sh" "manual"
     create_horizontal_pane "land" "bash $WORKSPACE/shfiles/land.sh" "manual"
     create_yopo_planner_window
+    create_yolo_ego_planner_window
 }
 
 # 程序启动 #

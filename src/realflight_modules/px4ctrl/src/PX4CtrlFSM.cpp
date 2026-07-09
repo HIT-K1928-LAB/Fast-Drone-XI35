@@ -106,6 +106,7 @@ void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &d
 
     if (odom_data.p(2) >= takeoff_land_ctx.start_pose(2) + param.takeoff_land.height) {
         state = AUTO_HOVER;
+        controller.resetThrustMapping(bat_data);
         set_hov_with_odom();
 
         ROS_INFO("\033[32m[px4ctrl] AUTO_TAKEOFF --> AUTO_HOVER(L2)\033[32m");
@@ -125,15 +126,6 @@ void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &d
 void PX4CtrlFSM::handleAutoLand(
     const ros::Time &now_time, Desired_State_t &des, bool &rotor_low_speed_during_land) {
     if (tryFallbackToManual(now_time)) return;
-
-    if (!commandSwitchEnabled()) {
-        state = AUTO_HOVER;
-        set_hov_with_odom();
-        des = get_hover_des();
-
-        ROS_INFO("[px4ctrl] From AUTO_LAND to AUTO_HOVER(L2)!");
-        return;
-    }
 
     if (!get_landed()) {
         des = get_takeoff_land_des(-param.takeoff_land.speed);
@@ -184,6 +176,11 @@ bool PX4CtrlFSM::commandSwitchTriggered() const { return rc_data.enter_command_m
 
 // ---- guards ----
 bool PX4CtrlFSM::canEnterAutoHover(const ros::Time &now_time) const {
+    if (!bat_is_received(now_time)) {
+        ROS_ERROR("[px4ctrl] Reject AUTO_HOVER(L2). No battery data!");
+        return false;
+    }
+
     if (!odom_is_received(now_time)) {
         ROS_ERROR("[px4ctrl] Reject AUTO_HOVER(L2). No odom!");
         return false;

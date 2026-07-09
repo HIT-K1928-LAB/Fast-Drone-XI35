@@ -84,8 +84,7 @@ class PX4CtrlFSM {
     // add by bk
     bool emergency_hover = false;
     void emergency_callback(const std_msgs::BoolConstPtr &msg) {
-        // if(msg->data == true)
-        // 	emergency_hover = true;
+        if (msg->data == true) emergency_hover = true;
     }
 
     bool search_hover = false;
