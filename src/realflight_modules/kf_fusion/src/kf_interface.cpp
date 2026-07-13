@@ -64,9 +64,19 @@ void KfInterface::processMeasurements() {
                         default:
                             break;
                     }
-                    health_monitor_.CheckAndPublish(pub_kf_fail_);
-                    publishImuOdom(meas->timestamp_s);
-                    publishExt(meas->timestamp_s);
+                   health_monitor_.CheckAndPublish(pub_kf_fail_);
+
+/*
+ * KF 内部状态始终表示最新 IMU 时刻的状态。
+ * 延迟 odom 只用于修正当前状态，不能将当前状态使用历史
+ * odom 时间戳再次发布，否则输出时间戳会倒退。
+ *
+ * 只在 IMU 更新后发布高频当前状态。
+ */
+if (meas->type == MeasureType::kImu) {
+    publishImuOdom(meas->timestamp_s);
+    publishExt(meas->timestamp_s);
+}
                 }
             }
         } else {
@@ -100,7 +110,7 @@ void KfInterface::publishImuOdom(double t) {
 
     nav_msgs::Odometry odom_msg;
     odom_msg.header.stamp            = ros::Time(t);
-    odom_msg.header.frame_id         = "world";
+    odom_msg.header.frame_id         = "map";
     odom_msg.pose.pose.orientation.x = state_oir_q.x();
     odom_msg.pose.pose.orientation.y = state_oir_q.y();
     odom_msg.pose.pose.orientation.z = state_oir_q.z();
@@ -117,11 +127,11 @@ void KfInterface::publishImuOdom(double t) {
     pub_imu_odom_.publish(odom_msg);
 
     geometry_msgs::PoseStamped imu_pose_stamped;
-    imu_pose_stamped.header.frame_id = "world";
+    imu_pose_stamped.header.frame_id = "map";
     imu_pose_stamped.header.stamp    = ros::Time(t);
     imu_pose_stamped.pose            = odom_msg.pose.pose;
     imu_path_.header.stamp           = ros::Time(t);
-    imu_path_.header.frame_id        = "world";
+    imu_path_.header.frame_id        = "map";
     imu_path_.poses.push_back(imu_pose_stamped);
     pub_imu_path_.publish(imu_path_);
 
@@ -136,7 +146,7 @@ void KfInterface::publishImuOdom(double t) {
 void KfInterface::publishObvOdom(const OdomMeasPtr& odom_meas) {
     nav_msgs::Odometry odom_msg;
     odom_msg.header.stamp            = ros::Time(odom_meas->timestamp_s);
-    odom_msg.header.frame_id         = "world";
+    odom_msg.header.frame_id         = "map";
     odom_msg.pose.pose.orientation.x = odom_meas->q_w_b.x();
     odom_msg.pose.pose.orientation.y = odom_meas->q_w_b.y();
     odom_msg.pose.pose.orientation.z = odom_meas->q_w_b.z();
@@ -150,11 +160,11 @@ void KfInterface::publishObvOdom(const OdomMeasPtr& odom_meas) {
     pub_obv_odom_.publish(odom_msg);
 
     geometry_msgs::PoseStamped obv_pose_stamped;
-    obv_pose_stamped.header.frame_id = "world";
+    obv_pose_stamped.header.frame_id = "map";
     obv_pose_stamped.header.stamp    = ros::Time(odom_meas->timestamp_s);
     obv_pose_stamped.pose            = odom_msg.pose.pose;
     obv_path_.header.stamp           = ros::Time(odom_meas->timestamp_s);
-    obv_path_.header.frame_id        = "world";
+    obv_path_.header.frame_id        = "map";
     obv_path_.poses.push_back(obv_pose_stamped);
     pub_obv_path_.publish(obv_path_);
 }
@@ -171,7 +181,7 @@ void KfInterface::publishExt(double t) {
 
     geometry_msgs::PoseStamped msg;
     msg.header.stamp       = ros::Time(t);
-    msg.header.frame_id    = "world";
+    msg.header.frame_id    = "map";
     msg.pose.orientation.x = state_ext_ori.unit_quaternion().x();
     msg.pose.orientation.y = state_ext_ori.unit_quaternion().y();
     msg.pose.orientation.z = state_ext_ori.unit_quaternion().z();

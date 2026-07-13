@@ -303,7 +303,67 @@ namespace ego_planner
         Eigen::MatrixXd optimal_control_points;
         flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
         if (flag_step_2_success)
-          pos = UniformBspline(optimal_control_points, 3, ts);
+{
+  // 构造refine后的最终轨迹
+  pos = UniformBspline(optimal_control_points, 3, ts);
+
+  // 新构造的B样条必须重新设置物理约束
+  pos.setPhysicalLimits(
+      pp_.max_vel_,
+      pp_.max_acc_,
+      pp_.feasibility_tolerance_);
+
+  bool final_feasible = false;
+  double final_ratio = 1.0;
+
+  /*
+   * 对最终轨迹执行硬可行性检查。
+   * 如果仍超限，只延长轨迹时间，不改变空间路径。
+   */
+  for (int iter = 0; iter < 5; ++iter)
+  {
+    final_ratio = 1.0;
+
+    final_feasible =
+        pos.checkFeasibility(final_ratio, iter == 0);
+
+    if (final_feasible)
+    {
+      break;
+    }
+
+    // 留出2%的安全裕度，避免浮点误差导致再次临界超限
+    double stretch_ratio = final_ratio * 1.02;
+
+    if (stretch_ratio < 1.02)
+    {
+      stretch_ratio = 1.02;
+    }
+
+    ROS_WARN(
+        "[EGO] Final trajectory infeasible, "
+        "stretching time by %.3f, iteration=%d",
+        stretch_ratio,
+        iter + 1);
+
+    pos.lengthenTime(stretch_ratio);
+  }
+
+  // 最终硬检查
+  final_ratio = 1.0;
+  final_feasible = pos.checkFeasibility(final_ratio, true);
+
+  if (!final_feasible)
+  {
+    ROS_ERROR(
+        "[EGO] Final trajectory remains dynamically infeasible, "
+        "ratio=%.3f. Reject this trajectory.",
+        final_ratio);
+
+    continous_failures_count_++;
+    return false;
+  }
+}
       }
 
       if (!flag_step_2_success)

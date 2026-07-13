@@ -145,10 +145,28 @@ void renderSensedPoints(const ros::TimerEvent& event) {
   _local_map.height = 1;
   _local_map.is_dense = true;
 
-  pcl::toROSMsg(_local_map, _local_map_pcd);
-  _local_map_pcd.header.frame_id = "map";
+ pcl::toROSMsg(_local_map, _local_map_pcd);
 
-  pub_cloud.publish(_local_map_pcd);
+/*
+ * 使用生成该点云时对应的最新里程计时间。
+ * 初始化阶段里程计时间为零时，退化为当前ROS时间。
+ */
+if (_odom.header.stamp.isZero())
+{
+  _local_map_pcd.header.stamp = ros::Time::now();
+}
+else
+{
+  _local_map_pcd.header.stamp = _odom.header.stamp;
+}
+
+/*
+ * 当前仿真中EGO的grid_map/frame_id为world，
+ * 因此局部点云也统一为world。
+ */
+_local_map_pcd.header.frame_id = "map";
+
+pub_cloud.publish(_local_map_pcd);
 }
 
 void rcvLocalPointCloudCallBack(

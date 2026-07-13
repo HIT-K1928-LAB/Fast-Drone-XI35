@@ -74,16 +74,50 @@ add_message_files(
 )
 
 generate_messages(
- DEPENDENCIES
- geometry_msgs
+  DEPENDENCIES
+  geometry_msgs
 )
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs message_runtime
-  DEPENDS EIGEN3 PCL
-  INCLUDE_DIRS
+  CATKIN_DEPENDS
+    geometry_msgs
+    nav_msgs
+    sensor_msgs
+    roscpp
+    rospy
+    std_msgs
+    message_runtime
+    pcl_ros
+    tf
+    livox_ros_driver
+    eigen_conversions
+  DEPENDS
+    EIGEN3
+    PCL
 )
 
-add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
-target_link_libraries(fastlio_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
-target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
+add_executable(
+  fastlio_mapping
+  src/laserMapping.cpp
+  include/ikd-Tree/ikd_Tree.cpp
+  src/preprocess.cpp
+)
+
+# 必须加在 add_executable 后面
+add_dependencies(
+  fastlio_mapping
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+
+target_link_libraries(
+  fastlio_mapping
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${PYTHON_LIBRARIES}
+)
+
+target_include_directories(
+  fastlio_mapping PRIVATE
+  ${PYTHON_INCLUDE_DIRS}
+)

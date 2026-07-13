@@ -2,6 +2,7 @@
   <arg name="map_size_x_"/>
   <arg name="map_size_y_"/>
   <arg name="map_size_z_"/>
+  <arg name="ground_height_"/>
 
   <arg name="map_origin_x_"/>
   <arg name="map_origin_y_"/>
@@ -97,7 +98,7 @@
     <param name="grid_map/local_update_range_z"  value="4.5" /> 
     <param name="grid_map/obstacles_inflation"     value="0.12" /> 
     <param name="grid_map/local_map_margin" value="30"/>
-    <param name="grid_map/ground_height"        value="-0.01"/>
+    <param name="grid_map/ground_height"        value="$(arg ground_height_)"/>
     <param name="grid_map/map_origin_x"   value="$(arg map_origin_x_)" />
     <param name="grid_map/map_origin_y"   value="$(arg map_origin_y_)" />
 
@@ -126,7 +127,7 @@
     <param name="grid_map/visualization_truncate_height"   value="1.8"/>
     <param name="grid_map/show_occ_time"  value="false"/>
     <param name="grid_map/pose_type"     value="2"/>  
-    <param name="grid_map/frame_id"      value="world"/>
+    <param name="grid_map/frame_id"      value="map"/>
 
   <!-- planner manager -->
     <param name="manager/max_vel" value="$(arg max_vel)" type="double"/>

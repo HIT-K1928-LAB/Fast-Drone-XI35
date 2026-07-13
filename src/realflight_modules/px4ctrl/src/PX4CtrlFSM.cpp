@@ -597,7 +597,7 @@ void PX4CtrlFSM::publish_attitude_ctrl(const Controller_Output_t &u, const ros::
 
 void PX4CtrlFSM::publish_trigger(const nav_msgs::Odometry &odom_msg) {
     geometry_msgs::PoseStamped msg;
-    msg.header.frame_id = "world";
+    msg.header.frame_id = "map";
     msg.pose            = odom_msg.pose.pose;
 
     traj_start_trigger_pub.publish(msg);
