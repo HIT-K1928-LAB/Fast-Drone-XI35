@@ -34,12 +34,15 @@ catkin_package(
 include_directories(${PROJECT_SOURCE_DIR}/include ${catkin_INCLUDE_DIRS} ${Eigen3_INCLUDE_DIRS})
 
 add_library(search_lib src/search_plan_fsm.cpp)
+add_dependencies(search_lib
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
 target_link_libraries(search_lib ${catkin_LIBRARIES})
 
 add_executable(search_node src/search_plan_node.cpp)
-target_link_libraries(search_node search_lib)
-
 add_dependencies(search_node 
   ${${PROJECT_NAME}_EXPORTED_TARGETS} 
   ${catkin_EXPORTED_TARGETS}
 )
+target_link_libraries(search_node search_lib)

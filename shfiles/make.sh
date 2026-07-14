@@ -10,8 +10,9 @@ DEFAULT_BUILD_TYPE="Release"
 usage() {
   cat <<'EOF'
 Usage:
-  shfiles/make.sh all [options]              Build all catkin packages
-  shfiles/make.sh pkg <package> [options]    Build one catkin package
+  shfiles/make.sh all [options]              Build all catkin packages with catkin build
+  shfiles/make.sh pkg <package> [options]    Build one catkin package with catkin build
+  shfiles/make.sh clean [options]             Clean catkin build products
   shfiles/make.sh list [--paths]             List packages in this workspace
   shfiles/make.sh completion                 Print bash completion script
 
@@ -19,16 +20,25 @@ Options:
   -t, --type <Release|Debug|RelWithDebInfo|MinSizeRel>
                                       CMake build type. Default: Release
   -c, --compile-commands             Generate compile_commands.json
-  -j, --jobs <N>                     Pass -jN to make
+  -j, --jobs <N>                     Pass -j N to catkin build
   -n, --dry-run                      Print the command without running it
   -h, --help                         Show help
-  -- <extra cmake args...>           Forward extra args to catkin_make
+  -- <extra cmake args...>           Forward extra args to catkin build --cmake-args
+
+Clean options:
+  shfiles/make.sh clean              Clean build/devel/install/log products
+  shfiles/make.sh clean --logs       Clean only logs
+  shfiles/make.sh clean --build      Clean only build space
+  shfiles/make.sh clean --devel      Clean only devel space
+  shfiles/make.sh clean --install    Clean only install space
+  shfiles/make.sh clean -n           Show what would be cleaned
 
 Examples:
   shfiles/make.sh all
   shfiles/make.sh all -c
   shfiles/make.sh pkg yopo_planner
   shfiles/make.sh pkg quadrotor_msgs -c -j8
+  shfiles/make.sh clean
   shfiles/make.sh list --paths
 
 Bash completion:
@@ -149,25 +159,30 @@ parse_build_options() {
   done
 }
 
-run_catkin_make() {
-  local cmd=(catkin_make)
+run_catkin_build() {
+  local cmd=(catkin build)
+  local cmake_args=()
 
   if [[ $# -gt 0 ]]; then
     cmd+=("$@")
   fi
 
-  cmd+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
+  cmake_args+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
 
   if [[ "${EXPORT_COMPILE_COMMANDS}" == true ]]; then
-    cmd+=("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    cmake_args+=("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
   fi
 
   if [[ ${#EXTRA_CMAKE_ARGS[@]} -gt 0 ]]; then
-    cmd+=("${EXTRA_CMAKE_ARGS[@]}")
+    cmake_args+=("${EXTRA_CMAKE_ARGS[@]}")
   fi
 
   if [[ ${#CATKIN_ARGS[@]} -gt 0 ]]; then
     cmd+=("${CATKIN_ARGS[@]}")
+  fi
+
+  if [[ ${#cmake_args[@]} -gt 0 ]]; then
+    cmd+=("--cmake-args" "${cmake_args[@]}")
   fi
 
   echo "Workspace: ${WORKSPACE_ROOT}"
@@ -185,7 +200,7 @@ run_catkin_make() {
 
 build_all() {
   parse_build_options "$@"
-  run_catkin_make
+  run_catkin_build
 }
 
 build_package() {
@@ -207,7 +222,63 @@ EOF
   fi
 
   parse_build_options "$@"
-  run_catkin_make --pkg "${package}"
+  run_catkin_build "${package}"
+}
+
+clean_products() {
+  local cmd=(catkin clean -y)
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--dry-run)
+        cmd+=("--dry-run")
+        ;;
+      -b|--build|--build-space)
+        cmd+=("--build")
+        ;;
+      -d|--devel|--devel-space)
+        cmd+=("--devel")
+        ;;
+      -i|--install|--install-space)
+        cmd+=("--install")
+        ;;
+      -L|--logs|--log-space)
+        cmd+=("--logs")
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  shfiles/make.sh clean [options]
+
+Options:
+  -n, --dry-run      Show what would be cleaned
+  -b, --build        Clean only build space
+  -d, --devel        Clean only devel space
+  -i, --install      Clean only install space
+  -L, --logs         Clean only log space
+  -h, --help         Show help
+EOF
+        return 0
+        ;;
+      -*)
+        echo "Unknown clean option: $1" >&2
+        return 2
+        ;;
+      *)
+        echo "Unknown clean argument: $1" >&2
+        return 2
+        ;;
+    esac
+    shift
+  done
+
+  echo "Workspace: ${WORKSPACE_ROOT}"
+  printf 'Command:'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+
+  cd "${WORKSPACE_ROOT}"
+  "${cmd[@]}"
 }
 
 print_completion() {
@@ -219,7 +290,7 @@ _fast_drone_make_completion() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   script="${COMP_WORDS[0]}"
-  commands="all pkg package list ls completion help"
+  commands="all pkg package clean list ls completion help"
 
   case "${COMP_CWORD}" in
     1)
@@ -238,6 +309,10 @@ _fast_drone_make_completion() {
       ;;
     list|ls)
       COMPREPLY=( $(compgen -W "--paths -p --names-only --help -h" -- "${cur}") )
+      return 0
+      ;;
+    clean)
+      COMPREPLY=( $(compgen -W "-n --dry-run -b --build --build-space -d --devel --devel-space -i --install --install-space -L --logs --log-space -h --help" -- "${cur}") )
       return 0
       ;;
   esac
@@ -278,6 +353,9 @@ main() {
       ;;
     pkg|package)
       build_package "$@"
+      ;;
+    clean)
+      clean_products "$@"
       ;;
     list|ls)
       list_packages "$@"

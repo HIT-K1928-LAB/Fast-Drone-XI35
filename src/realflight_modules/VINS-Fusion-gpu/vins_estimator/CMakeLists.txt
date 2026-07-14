@@ -40,7 +40,17 @@ include_directories(
   ${EIGEN3_INCLUDE_DIR}
   ${OpenCV_INCLUDE_DIRS}
 )
-catkin_package()
+catkin_package(
+  CATKIN_DEPENDS
+  roscpp
+  std_msgs
+  geometry_msgs
+  nav_msgs
+  tf
+  cv_bridge_454
+  camera_models
+  image_transport
+)
 message(STATUS "OpenCV library status:")
 message(STATUS "    version: ${OpenCV_VERSION}")
 message(STATUS "    libraries: ${OpenCV_LIBS}")
@@ -80,4 +90,3 @@ target_link_libraries(kitti_odom_test vins_lib)
 
 add_executable(kitti_gps_test src/KITTIGPSTest.cpp)
 target_link_libraries(kitti_gps_test vins_lib) 
-

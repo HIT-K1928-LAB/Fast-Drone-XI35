@@ -35,7 +35,7 @@ find_package(Eigen3 REQUIRED)
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}_lib
-  CATKIN_DEPENDS roscpp rospy std_msgs sensor_msgs geometry_msgs image_transport
+  CATKIN_DEPENDS roscpp rospy std_msgs sensor_msgs geometry_msgs cv_bridge_454 camera_models image_transport
 )
 
 if(EXISTS "/usr/local/include/tensorrt")

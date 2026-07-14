@@ -23,7 +23,7 @@ generate_messages(
 )
 
 catkin_package(
-  CATKIN_DEPENDS rospy std_msgs sensor_msgs message_runtime
+  CATKIN_DEPENDS rospy std_msgs sensor_msgs message_runtime cv_bridge_3416
 )
 
 include_directories(
@@ -33,4 +33,3 @@ include_directories(
 catkin_install_python(PROGRAMS src/target_recognition_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-

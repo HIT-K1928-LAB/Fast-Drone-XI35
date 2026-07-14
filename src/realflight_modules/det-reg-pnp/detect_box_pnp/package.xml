@@ -23,6 +23,14 @@
   <build_depend>rostime</build_depend>
   <build_depend>std_msgs</build_depend>
   <build_depend>prometheus_msgs</build_depend>
+  <build_depend>image_transport</build_depend>
+  <build_depend>cv_bridge_3416</build_depend>
+  <build_depend>actionlib</build_depend>
+  <build_depend>tf2_eigen</build_depend>
+  <build_depend>tf</build_depend>
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>std_srvs</build_depend>
+  <build_depend>tf2_ros</build_depend>
 
   <run_depend>message_runtime</run_depend>
   <run_depend>rosconsole</run_depend>
@@ -31,6 +39,14 @@
   <run_depend>rostime</run_depend>
   <run_depend>std_msgs</run_depend>
   <run_depend>prometheus_msgs</run_depend>
+  <run_depend>image_transport</run_depend>
+  <run_depend>cv_bridge_3416</run_depend>
+  <run_depend>actionlib</run_depend>
+  <run_depend>tf2_eigen</run_depend>
+  <run_depend>tf</run_depend>
+  <run_depend>nav_msgs</run_depend>
+  <run_depend>std_srvs</run_depend>
+  <run_depend>tf2_ros</run_depend>
   
 
   <build_depend>std_msgs</build_depend>

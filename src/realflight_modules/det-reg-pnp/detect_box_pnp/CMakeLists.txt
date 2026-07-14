@@ -87,4 +87,8 @@ add_executable(detect_box_pnp
     src/detect_box_pnp_node.cpp
 )
 
+add_dependencies(detect_box_pnp
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
 target_link_libraries(detect_box_pnp bottom_camera_lib)

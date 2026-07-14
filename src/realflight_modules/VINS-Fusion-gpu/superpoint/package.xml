@@ -54,12 +54,16 @@
   <build_depend>rospy</build_depend>
   <build_depend>sensor_msgs</build_depend>
   <build_depend>std_msgs</build_depend>
+  <build_depend>cv_bridge_454</build_depend>
+  <build_depend>camera_models</build_depend>
   <build_depend>image_transport</build_depend>
   <build_export_depend>geometry_msgs</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>rospy</build_export_depend>
   <build_export_depend>sensor_msgs</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>cv_bridge_454</build_export_depend>
+  <build_export_depend>camera_models</build_export_depend>
   <build_export_depend>image_transport</build_export_depend>
 
   <exec_depend>geometry_msgs</exec_depend>
@@ -67,6 +71,8 @@
   <exec_depend>rospy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>cv_bridge_454</exec_depend>
+  <exec_depend>camera_models</exec_depend>
   <exec_depend>image_transport</exec_depend>
 
 
