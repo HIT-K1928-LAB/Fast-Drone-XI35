@@ -9,6 +9,7 @@ TIME_DIR_REGEX='^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$'
 
 usage() {
     echo "Usage:"
+    echo "  $0 clear"
     echo "  $0 delete"
     echo "  $0 convert"
 }
@@ -87,7 +88,7 @@ convert_ros_log_dirs() {
 }
 
 case "${1:-}" in
-    delete)
+    clear | delete)
         delete_logs
         ;;
     convert)
