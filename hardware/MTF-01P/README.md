@@ -4,7 +4,7 @@ MTF-01P是微空科技研发设计并生产的一款光流测距一体传感器�
 
 依靠MTF-01P传感器，无人机可以实现室内无GPS环境下的自主悬停飞行。
 
-<img src="../../images/hardware/MTF-01P/mtf01p-1.png" width = 50% height = 50% div align=center />
+<img src="../../docs/assets/hardware/MTF-01P/mtf01p-1.png" width = 50% height = 50% div align=center />
 
 
 ### 产品参数
@@ -43,7 +43,7 @@ MTF-01P是微空科技研发设计并生产的一款光流测距一体传感器�
 
 - 重量：8g
 
-<img src="../../images/hardware/MTF-01P/mtf01p-2.png" width = 50% height = 50% div align=center />
+<img src="../../docs/assets/hardware/MTF-01P/mtf01p-2.png" width = 50% height = 50% div align=center />
 
 ### 接口定义
 
@@ -57,7 +57,7 @@ MTF-01P是微空科技研发设计并生产的一款光流测距一体传感器�
 
 ### 安装方向
 
-<img src="../../images/hardware/MTF-01P/mtf01p-3.png" width = 50% height = 50% div align=center />
+<img src="../../docs/assets/hardware/MTF-01P/mtf01p-3.png" width = 50% height = 50% div align=center />
 
 也可以在微空助手中调整方向参数
 
@@ -105,4 +105,3 @@ MTF-01支持四种数据协议：
 
 listener sensor_optical_flow
 listener distance_sensor
-
