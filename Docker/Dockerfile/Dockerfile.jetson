@@ -17,6 +17,8 @@ ARG ENABLE_NEON="ON"
 ENV OPENCV_VERSION=4.5.4
 ARG OPENCV3_VERSION=3.4.16
 ARG CERES_VERSION=2.0.0rc1
+ARG SOPHUS_REPOSITORY=https://github.com/strasdat/Sophus.git
+ARG SOPHUS_COMMIT=a621ff2e56c56c839a6c40418d42c3c254424b5c
 ARG VISION_OPENCV_VERSION=1.16.2
 ARG GLOG_REPOSITORY=https://github.com/boboxxd/glog.git
 ARG GLOG_VERSION=master
@@ -95,6 +97,9 @@ RUN apt-get update && \
     ros-${ROS_VERSION}-tf2-ros \
     ros-${ROS_VERSION}-roscpp \
     ros-${ROS_VERSION}-roslaunch \
+    ros-${ROS_VERSION}-cmake-modules \
+    ros-${ROS_VERSION}-eigen-conversions \
+    ros-${ROS_VERSION}-visualization-msgs \
     ros-${ROS_VERSION}-vrpn-client-ros \
     ros-${ROS_VERSION}-mavros \
     librealsense2-dev=2.55.1-0~realsense.3336 \
@@ -118,6 +123,37 @@ RUN apt-get update && \
     echo "${TZ}" > /etc/timezone && \
     echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# FAST-LIVO2 requires the legacy, non-templated Sophus API. The two setter
+# substitutions make that pinned revision compatible with Eigen on Ubuntu 20.04.
+RUN   for attempt in 1 2 3 4 5; do \
+          git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout \
+              ${SOPHUS_REPOSITORY} /tmp/Sophus && break; \
+          rm -rf /tmp/Sophus; \
+          sleep 5; \
+      done && \
+      test -d /tmp/Sophus/.git && \
+      git -C /tmp/Sophus checkout --detach ${SOPHUS_COMMIT} && \
+      sed -i \
+          -e 's/unit_complex_\.real() = 1\.;/unit_complex_.real(1.);/' \
+          -e 's/unit_complex_\.imag() = 0\.;/unit_complex_.imag(0.);/' \
+          /tmp/Sophus/sophus/so2.cpp && \
+      cmake -S /tmp/Sophus -B /tmp/Sophus/build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr/local && \
+      cmake --build /tmp/Sophus/build --target Sophus --parallel ${USE_PROC} && \
+      cmake --install /tmp/Sophus/build && \
+      install -d /usr/local/lib/cmake/Sophus && \
+      printf '%s\n' \
+          'set(Sophus_INCLUDE_DIR "/usr/local/include;/usr/include/eigen3")' \
+          'set(Sophus_INCLUDE_DIRS "/usr/local/include;/usr/include/eigen3")' \
+          'set(Sophus_LIBRARIES "/usr/local/lib/libSophus.so")' \
+          'set(Sophus_LIBRARY "/usr/local/lib/libSophus.so")' \
+          'set(Sophus_LIBRARY_DIR "/usr/local/lib")' \
+          'set(Sophus_LIBRARY_DIRS "/usr/local/lib")' \
+          > /usr/local/lib/cmake/Sophus/SophusConfig.cmake && \
+      ldconfig && \
+      rm -rf /tmp/Sophus /root/.cmake/packages/Sophus
 
 # Prepare cv_bridge from vision_opencv for OpenCV 4
 RUN   wget -q --tries=5 --waitretry=5 --timeout=30 --read-timeout=30 --retry-connrefused https://github.com/ros-perception/vision_opencv/archive/refs/tags/${VISION_OPENCV_VERSION}.zip -O /tmp/vision_opencv.zip && \
