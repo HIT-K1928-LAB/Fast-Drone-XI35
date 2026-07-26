@@ -9,7 +9,7 @@
 ```text
 profiles/<profile_name>/
 ├── profile.env
-├── flight_layout.sh          # 可选：覆写该 profile 的 tmux 布局
+├── flight_profile.sh         # 可选：扩展环境并覆写 tmux 布局
 ├── px4ctrl/
 │   └── ctrl_param_fpv.yaml
 └── vins/
@@ -58,7 +58,7 @@ CAMERA_TYPE="realsense"
 LOCALIZATION_DEFAULT="vins_stereo"
 
 # 可选；相对路径从 Fast-Drone-XI35 仓库根目录解析
-# FLIGHT_LAYOUT_SCRIPT="bringup/profiles/xi35_10/flight_layout.sh"
+# FLIGHT_PROFILE_SCRIPT="bringup/profiles/xi35_10/flight_profile.sh"
 ```
 
 字段说明：
@@ -73,16 +73,23 @@ LOCALIZATION_DEFAULT="vins_stereo"
 | `ROS_IP_DEFAULT` | 该机型启动时强制使用的本机 ROS IP |
 | `CAMERA_TYPE` | 相机类型说明，会显示在 status窗口中 |
 | `LOCALIZATION_DEFAULT` | 未传第二个命令行参数时使用的定位方式 |
-| `FLIGHT_LAYOUT_SCRIPT` | 可选的 tmux布局覆写脚本；相对路径从仓库根目录解析 |
+| `FLIGHT_PROFILE_SCRIPT` | 可选的环境和 tmux布局覆写脚本；相对路径从仓库根目录解析 |
 
-使用内置布局时，`flight.sh` 会自动校验并解析 `VINS_CONFIG` 和 `PX4CTRL_CONFIG`。配置 `FLIGHT_LAYOUT_SCRIPT` 后，这两个字段变为可选，外部布局应自行校验它实际需要的配置。新增其他模块配置时，可在外部布局中使用 `$PROFILE_DIR` 将 profile相对路径解析为绝对路径。
+使用内置布局时，`flight.sh` 会自动校验并解析 `VINS_CONFIG` 和 `PX4CTRL_CONFIG`。配置 `FLIGHT_PROFILE_SCRIPT` 后，这两个字段变为可选，外部脚本应自行校验它实际需要的配置。新增其他模块配置时，可在外部脚本中使用 `$PROFILE_DIR` 将 profile相对路径解析为绝对路径。
 
-## 覆写 tmux布局
+## 扩展环境并覆写 tmux布局
 
-如果某个 profile不需要默认的完整飞行布局，可在该 profile目录中新建 `flight_layout.sh`：
+如果某个 profile需要额外环境变量或不使用默认完整布局，可在该 profile目录中新建 `flight_profile.sh`：
 
 ```bash
 #!/usr/bin/env bash
+
+setup_profile_environment() {
+    # profile.env 中的变量可在这里直接读取。需要由 ROS、Gazebo、
+    # PX4 等子进程继承的变量必须显式 export。
+    export PX4_SIM_MODEL="$PX4_MODEL"
+    export GAZEBO_MODEL_PATH="$PROFILE_DIR/models${GAZEBO_MODEL_PATH:+:$GAZEBO_MODEL_PATH}"
+}
 
 build_user_layout() {
     start_localization
@@ -92,12 +99,14 @@ build_user_layout() {
 然后在对应的 `profile.env` 中配置仓库根目录相对路径：
 
 ```bash
-FLIGHT_LAYOUT_SCRIPT="bringup/profiles/xi35_10/flight_layout.sh"
+FLIGHT_PROFILE_SCRIPT="bringup/profiles/xi35_10/flight_profile.sh"
 ```
 
-`flight.sh` 会使用 `source` 在当前 shell中加载该文件，因此它必须定义 `build_user_layout()`。配置了脚本但文件不存在、不可读或没有定义该函数时，启动会直接报错，不会回退到默认布局。未配置或值为空时，仍使用内置的 `start_localization + start_control + start_services`。
+`flight.sh` 会先加载 `profile.env`，再使用 `source` 加载该文件。因此，`flight_profile.sh` 可以直接读取 `profile.env` 中的全部 shell变量。可选的 `setup_profile_environment()` 会在顶层启动进程和每个 tmux pane 中各执行一次，应该只设置环境且保持可重复执行；不要在其中启动程序。
 
-覆写脚本应只定义函数，不要在文件顶层直接启动程序。它可以调用 `flight.sh` 已提供的 `new_window`、`add_pane`、`start_localization`、`start_control` 和 `start_services`。该文件会作为 shell代码执行，只应指向仓库中可信的脚本。
+外部脚本必须定义 `build_user_layout()`。配置了脚本但文件不存在、不可读或没有定义该函数时，启动会直接报错，不会回退到默认布局。未定义 `FLIGHT_PROFILE_SCRIPT` 或值为空时，不会加载任何外部脚本，仍使用内置的 `start_localization + start_control + start_services`。
+
+`profile.env` 中的普通赋值是 shell变量，不会自动导出给 ROS等子进程。需要子进程继承的变量，应在 `setup_profile_environment()` 中显式 `export`。外部脚本应只定义函数，不要在文件顶层直接启动程序；`build_user_layout()` 可以调用 `flight.sh` 提供的 `new_window`、`add_pane`、`start_localization`、`start_control` 和 `start_services`。该文件会作为 shell代码执行，只应指向仓库中的可信脚本。
 
 ## 新增机型
 

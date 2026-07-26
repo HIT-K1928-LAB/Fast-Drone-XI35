@@ -102,25 +102,32 @@ USER MAINTENANCE AREA
 
 底层环境加载、布局屏障和终端信号处理不需要修改。
 
-### 为单个 profile覆写布局
+### 为单个 profile扩展环境并覆写布局
 
 在 `profile.env` 中配置：
 
 ```bash
-FLIGHT_LAYOUT_SCRIPT="bringup/profiles/xi35_10/flight_layout.sh"
+FLIGHT_PROFILE_SCRIPT="bringup/profiles/xi35_10/flight_profile.sh"
 ```
 
-路径相对于仓库根目录。对应脚本必须定义 `build_user_layout()`，例如只启动定位模块：
+路径相对于仓库根目录。对应脚本可以定义 `setup_profile_environment()` 添加环境变量，并且必须定义 `build_user_layout()`：
 
 ```bash
 #!/usr/bin/env bash
+
+setup_profile_environment() {
+    export PX4_SIM_MODEL="$PX4_MODEL"
+    export GAZEBO_MODEL_PATH="$PROFILE_DIR/models${GAZEBO_MODEL_PATH:+:$GAZEBO_MODEL_PATH}"
+}
 
 build_user_layout() {
     start_localization
 }
 ```
 
-脚本由 `flight.sh` 使用 `source` 加载，而不是作为子进程执行，因此新定义的 `build_user_layout()` 会取代内置默认布局。未配置 `FLIGHT_LAYOUT_SCRIPT` 时行为不变。布局脚本应只定义函数，不要在顶层执行启动命令。
+`flight.sh` 会先加载 `profile.env`，再使用 `source` 加载外部脚本，因此 hook可以直接读取 profile中的全部 shell变量。`setup_profile_environment()` 会在顶层进程和每个 pane中执行，需保持可重复执行；要让 ROS、Gazebo、PX4等子进程继承变量，必须显式 `export`。`build_user_layout()` 只在顶层进程中执行。
+
+未定义 `FLIGHT_PROFILE_SCRIPT` 或值为空时不会加载外部脚本，内置布局保持不变。外部脚本应只定义函数，不要在顶层执行启动命令。
 
 ### 添加所有 pane共用的环境变量
 
