@@ -1,0 +1,12 @@
+[submodule "src/simulation/px4_sitl"]
+	path = src/simulation/px4_sitl
+	url = git@github.com:HIT-K1928-LAB/PX4-Autopilot.git
+	branch = fast-drone-sim
+[submodule "src/simulation/xtdrone"]
+	path = src/simulation/xtdrone
+	url = git@github.com:HIT-K1928-LAB/XTDrone.git
+	branch = fast-drone-sim
+[submodule "src/simulation/gazebo_models"]
+	path = src/simulation/gazebo_models
+	url = git@github.com:HIT-K1928-LAB/gazebo_models.git
+	branch = main
