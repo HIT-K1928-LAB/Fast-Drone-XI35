@@ -71,7 +71,8 @@ RUN apt-get update && \
     libsuitesparse-dev \
     libcxsparse3 \
     libgflags-dev \
-    libgoogle-glog-dev
+    libgoogle-glog-dev \
+    tmux
 
 # ROS Noetic
 RUN install -d -m 0755 /etc/apt/keyrings && \

@@ -9,6 +9,8 @@ BUILD_NETWORK ?= host
 JETSON_PLATFORM ?= linux/arm64
 JETSON_IMAGE ?= fastdronexi35:orin
 PC_IMAGE ?= fastdronexi35:pc
+PC_SIM_BASE_IMAGE ?= $(PC_IMAGE)
+PC_SIM_IMAGE ?= fastdronexi35:pc-sim
 DOCKER_BUILDKIT ?= 1
 BUILDKIT_PROGRESS ?= auto
 DEFAULT_PROXY_HOST ?= $(shell if grep -qi microsoft /proc/version 2>/dev/null && getent hosts host.docker.internal >/dev/null 2>&1; then printf '%s' host.docker.internal; else printf '%s' 127.0.0.1; fi)
@@ -29,7 +31,7 @@ JETSON_PLATFORM_ARG := $(if $(JETSON_PLATFORM),--platform=$(JETSON_PLATFORM),)
 DOCKER_BUILD_ENV := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) BUILDKIT_PROGRESS=$(BUILDKIT_PROGRESS)
 BUILDKIT_PROGRESS_ARG := $(if $(filter 1,$(DOCKER_BUILDKIT)),--progress=$(BUILDKIT_PROGRESS),)
 
-.PHONY: check_buildkit check_tensorrt jetson jetson_rebuild pc rm_jetson
+.PHONY: check_buildkit check_tensorrt check_pc_image jetson jetson_rebuild pc pc_sim rm_jetson
 
 check_buildkit:
 	@if [ "$(DOCKER_BUILDKIT)" = "1" ] && ! docker buildx version >/dev/null 2>&1; then \
@@ -45,6 +47,13 @@ check_tensorrt:
 		exit 1; \
 	fi
 
+check_pc_image:
+	@if ! docker image inspect "$(PC_SIM_BASE_IMAGE)" >/dev/null 2>&1; then \
+		echo "Missing base image: $(PC_SIM_BASE_IMAGE)"; \
+		echo "Build it first with: make pc"; \
+		exit 1; \
+	fi
+
 jetson: check_buildkit
 	@$(DOCKER_BUILD_ENV) docker build $(BUILDKIT_PROGRESS_ARG) $(JETSON_PLATFORM_ARG) $(COMMON_BUILD_ARGS) -t $(JETSON_IMAGE) -f ./Dockerfile.jetson ..
 
@@ -56,6 +65,18 @@ pc: check_buildkit check_tensorrt
 	echo "HTTP proxy: $(if $(filter true,$(USE_PROXY)),$(CONTAINER_HTTP_PROXY),)"; \
 	echo "HTTPS proxy: $(if $(filter true,$(USE_PROXY)),$(CONTAINER_HTTPS_PROXY),)"; \
 	$(DOCKER_BUILD_ENV) docker build $(BUILDKIT_PROGRESS_ARG) $(COMMON_BUILD_ARGS) -t $(PC_IMAGE) -f ./Dockerfile.pc \
+		..
+
+pc_sim: check_buildkit check_pc_image
+	@echo "Base image: $(PC_SIM_BASE_IMAGE)"; \
+	echo "Simulation image: $(PC_SIM_IMAGE)"; \
+	echo "Use proxy: $(USE_PROXY)"; \
+	$(DOCKER_BUILD_ENV) docker build $(BUILDKIT_PROGRESS_ARG) \
+		--network=$(BUILD_NETWORK) \
+		$(PROXY_BUILD_ARGS) \
+		--build-arg PC_BASE_IMAGE=$(PC_SIM_BASE_IMAGE) \
+		-t $(PC_SIM_IMAGE) \
+		-f ./Dockerfile.pc_sim \
 		..
 
 rm_jetson:
