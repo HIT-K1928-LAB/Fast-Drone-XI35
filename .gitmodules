@@ -1,5 +1,5 @@
 [submodule "src/simulation/px4_sitl"]
-	path = src/simulation/px4_sitl
+	path = third_party/px4_sitl
 	url = git@github.com:HIT-K1928-LAB/PX4-Autopilot.git
 	branch = fast-drone-sim
 [submodule "src/simulation/xtdrone"]
