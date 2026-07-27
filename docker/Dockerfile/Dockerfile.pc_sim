@@ -40,6 +40,7 @@ RUN apt-get update && \
         python3-venv \
         python3-dev \
         gawk \
+        ros-${ROS_VERSION}-rqt-image-view \
         ros-${ROS_VERSION}-moveit-msgs \
         ros-${ROS_VERSION}-object-recognition-msgs \
         ros-${ROS_VERSION}-octomap-msgs \

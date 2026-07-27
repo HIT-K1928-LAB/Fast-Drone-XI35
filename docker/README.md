@@ -107,19 +107,7 @@ sudo systemctl restart docker
 3. 确认电脑的CUDA_ARCH_BIN，对Dockerfile.pc的ARG CUDA_ARCH_BIN=7.5（默认）进行修改
 
 ```bash
-git clone https://github.com/NVIDIA-AI-IOT/deepstream_tlt_apps.git
-cd deepstream_tlt_apps/TRT-OSS/x86
-nvcc deviceQuery.cpp -o deviceQuery
-./deviceQuery
-### 输出
-Detected 1 CUDA Capable device(s)
-
-Device 0: "NVIDIA GeForce GTX 1660 SUPER"
-  CUDA Driver Version / Runtime Version          12.2 / 11.8
-  CUDA Capability Major/Minor version number:    7.5
-
-CUDA Capability Major/Minor version number这个字段的数字就是CUDA_ARCH_BIN
-###
+nvidia-smi --query-gpu=compute_cap --format=csv,noheader,nounits
 ```
 
 4. 由于需要从 Docker Hub pull 一个 base 镜像，需要提前解决 Docker daemon 的代理或镜像源问题，否则会出错。上面的 `USE_PROXY` / `CONTAINER_HTTP_PROXY` 只影响 Dockerfile 内部下载依赖，不等同于 Docker daemon 拉镜像的代理配置
@@ -138,13 +126,12 @@ sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-
-1. 下载TensorRT到Docker文件夹下
+5. 下载TensorRT到Docker文件夹下
 
 下载地址（需要登录）：
 https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/secure/8.6.1/tars/TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz
 
-2. 构建Docker镜像
+6. 构建Docker镜像
 
 ```bash
 cd Docker/Dockerfile
@@ -178,7 +165,7 @@ REPOSITORY      TAG IMAGE ID        CREATED         SIZE
 fastdronexi35   pc  a615436b212d    19 hours ago    24.4GB
 ```
 
-3. 实例化Docker容器
+7. 实例化Docker容器
 
 其中$TARGET_DIR需要替换为宿主机的代码目录，或者其他的想要映射到容器内的目录
 
@@ -202,7 +189,7 @@ fastdronexi35:pc \
 bash
 ```
 
-4. 测试容器
+8. 测试容器
 
 - 进入容器终端
 
@@ -223,7 +210,7 @@ echo "source /root/Fast-Drone-XI35/devel/setup.bash" >> /root/.bashrc
 # 在代码根目录进行编译
 catkin_make -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release
 # source环境变量(如果已经添加过环境变量，则跳过)
-source devel/setup.bash 
+source devel/setup.bash
 # 启动各个节点
 roslaunch imu_filter imu_filter.launch
 roslaunch superpoint superpoint_frontend.launch
