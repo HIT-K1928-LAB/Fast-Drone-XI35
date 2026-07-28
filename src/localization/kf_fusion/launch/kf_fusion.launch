@@ -1,3 +1,4 @@
 <launch>
-	<node name="kf_fusion" pkg="kf_fusion" type="kf_fusion_node" output="screen" args="$(find kf_fusion)/config/config.yaml"/>
+	<arg name="config_file" default="$(find kf_fusion)/config/config.yaml"/>
+	<node name="kf_fusion" pkg="kf_fusion" type="kf_fusion_node" output="screen" args="$(arg config_file)"/>
 </launch>

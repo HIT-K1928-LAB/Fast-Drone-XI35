@@ -13,9 +13,9 @@ low_voltage: 13.6 # 4S battery
 
 rc_reverse:
     roll: true
-    pitch: false
+    pitch: true
     yaw: true
-    throttle: false
+    throttle: true
 
 auto_takeoff_land:
     enable: true
@@ -62,7 +62,7 @@ msg_timeout:
     bat:  0.5
 
 mavros:
-    namespace: "/mavros"
+    namespace: "/iris_0/mavros"
     battery_id: 147 # BATTERY_STATUS
     bat_msg_freq: 10 # Hz
     attitude_id: 30 # ATTITUDE

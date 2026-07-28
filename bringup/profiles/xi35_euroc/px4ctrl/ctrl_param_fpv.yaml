@@ -62,9 +62,12 @@ msg_timeout:
     bat:  0.5
 
 mavros:
+    namespace: "/mavros"
     battery_id: 147 # BATTERY_STATUS
     bat_msg_freq: 10 # Hz
     attitude_id: 30 # ATTITUDE
     attitude_msg_freq: 200 # Hz
+    attitude_quaternion_id: 31 # ATTITUDE_QUATERNION
+    attitude_quaternion_msg_freq: 250 # Hz
     highres_imu_id: 105 # HIGHRES_IMU
     highres_imu_msg_freq: 1000 # Hz

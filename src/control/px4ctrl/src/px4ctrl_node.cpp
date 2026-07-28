@@ -23,10 +23,10 @@ int main(int argc, char *argv[]) {
     PX4CtrlFSM fsm(param, controller);
 
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>(
-        "/mavros/state", 10, boost::bind(&State_Data_t::feed, &fsm.state_data, _1));
+        param.mavros_ns + "/state", 10, boost::bind(&State_Data_t::feed, &fsm.state_data, _1));
 
     ros::Subscriber extended_state_sub = nh.subscribe<mavros_msgs::ExtendedState>(
-        "/mavros/extended_state", 10,
+        param.mavros_ns + "/extended_state", 10,
         boost::bind(&ExtendedState_Data_t::feed, &fsm.extended_state_data, _1));
     ros::Subscriber odom_sub = nh.subscribe<nav_msgs::Odometry>(
         "odom", 100, boost::bind(&Odom_Data_t::feed, &fsm.odom_data, _1), ros::VoidConstPtr(),
@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
         ros::TransportHints().tcpNoDelay());
 
     ros::Subscriber imu_sub = nh.subscribe<sensor_msgs::Imu>(
-        "/mavros/imu/data",  // Note: do NOT change it to /mavros/imu/data_raw !!!
+        param.mavros_ns + "/imu/data",  // Note: do NOT change it to /mavros/imu/data_raw !!!
         100, boost::bind(&Imu_Data_t::feed, &fsm.imu_data, _1), ros::VoidConstPtr(),
         ros::TransportHints().tcpNoDelay());
 
@@ -46,11 +46,11 @@ int main(int argc, char *argv[]) {
              .no_RC)  // mavros will still publish wrong rc messages although no RC is connected
     {
         rc_sub = nh.subscribe<mavros_msgs::RCIn>(
-            "/mavros/rc/in", 10, boost::bind(&RC_Data_t::feed, &fsm.rc_data, _1));
+            param.mavros_ns + "/rc/in", 10, boost::bind(&RC_Data_t::feed, &fsm.rc_data, _1));
     }
 
     ros::Subscriber bat_sub = nh.subscribe<sensor_msgs::BatteryState>(
-        "/mavros/battery", 100, boost::bind(&Battery_Data_t::feed, &fsm.bat_data, _1),
+        param.mavros_ns + "/battery", 100, boost::bind(&Battery_Data_t::feed, &fsm.bat_data, _1),
         ros::VoidConstPtr(), ros::TransportHints().tcpNoDelay());
 
     ros::Subscriber takeoff_land_sub = nh.subscribe<quadrotor_msgs::TakeoffLand>(
@@ -58,18 +58,20 @@ int main(int argc, char *argv[]) {
         ros::VoidConstPtr(), ros::TransportHints().tcpNoDelay());
 
     fsm.ctrl_FCU_pub =
-        nh.advertise<mavros_msgs::AttitudeTarget>("/mavros/setpoint_raw/attitude", 10);
+        nh.advertise<mavros_msgs::AttitudeTarget>(param.mavros_ns + "/setpoint_raw/attitude", 10);
     fsm.traj_start_trigger_pub =
         nh.advertise<geometry_msgs::PoseStamped>("/traj_start_trigger", 10);
 
     fsm.debug_pub = nh.advertise<quadrotor_msgs::Px4ctrlDebug>("/debugPx4ctrl", 10);  // debug
 
-    fsm.set_FCU_mode_srv  = nh.serviceClient<mavros_msgs::SetMode>("/mavros/set_mode");
-    fsm.arming_client_srv = nh.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
-    fsm.reboot_FCU_srv    = nh.serviceClient<mavros_msgs::CommandLong>("/mavros/cmd/command");
+    fsm.set_FCU_mode_srv = nh.serviceClient<mavros_msgs::SetMode>(param.mavros_ns + "/set_mode");
+    fsm.arming_client_srv =
+        nh.serviceClient<mavros_msgs::CommandBool>(param.mavros_ns + "/cmd/arming");
+    fsm.reboot_FCU_srv =
+        nh.serviceClient<mavros_msgs::CommandLong>(param.mavros_ns + "/cmd/command");
 
     fsm.set_bat_freq =
-        nh.serviceClient<mavros_msgs::MessageInterval>("/mavros/set_message_interval");
+        nh.serviceClient<mavros_msgs::MessageInterval>(param.mavros_ns + "/set_message_interval");
     mavros_msgs::MessageInterval srv;
     srv.request.message_id   = param.mavros_battery_id;    // /mavros/battery ID
     srv.request.message_rate = param.mavros_bat_msg_freq;  // 10Hz
@@ -78,27 +80,37 @@ int main(int argc, char *argv[]) {
             "set bat message frequent %fHz result: %d", srv.request.message_rate,
             srv.response.success);
     } else {
-        ROS_ERROR("Failed to call /mavros/set_message_interval");
+        ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
     }
 
-    srv.request.message_id   = param.mavros_attitude_id;          // ATTITUDE
-    srv.request.message_rate = param.mavros_attitude_msg_freq;    // 200Hz
+    srv.request.message_id   = param.mavros_attitude_id;        // ATTITUDE
+    srv.request.message_rate = param.mavros_attitude_msg_freq;  // 200Hz
     if (fsm.set_bat_freq.call(srv)) {
         ROS_INFO(
             "set attitude message frequent %fHz result: %d", srv.request.message_rate,
             srv.response.success);
     } else {
-        ROS_ERROR("Failed to call /mavros/set_message_interval");
+        ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
     }
 
-    srv.request.message_id   = param.mavros_highres_imu_id;          // HIGHRES_IMU
-    srv.request.message_rate = param.mavros_highres_imu_msg_freq;    // 1000Hz
+    srv.request.message_id = param.mavros_attitude_quaternion_id;  // ATTITUDE_QUATERNION
+    srv.request.message_rate = param.mavros_attitude_quaternion_msg_freq;  // 250Hz
+    if (fsm.set_bat_freq.call(srv)) {
+        ROS_INFO(
+            "set attitude quaternion message frequent %fHz result: %d", srv.request.message_rate,
+            srv.response.success);
+    } else {
+        ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
+    }
+
+    srv.request.message_id   = param.mavros_highres_imu_id;        // HIGHRES_IMU
+    srv.request.message_rate = param.mavros_highres_imu_msg_freq;  // 1000Hz
     if (fsm.set_bat_freq.call(srv)) {
         ROS_INFO(
             "set highres imu message frequent %fHz result: %d", srv.request.message_rate,
             srv.response.success);
     } else {
-        ROS_ERROR("Failed to call /mavros/set_message_interval");
+        ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
     }
 
     // add by bk

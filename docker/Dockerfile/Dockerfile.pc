@@ -79,10 +79,16 @@ RUN install -d -m 0755 /etc/apt/keyrings && \
     wget ${WGET_RETRY_OPTS} \
         https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc \
         -O /etc/apt/keyrings/ros.asc && \
+    wget ${WGET_RETRY_OPTS} \
+        https://apt.llvm.org/llvm-snapshot.gpg.key \
+        -O /etc/apt/keyrings/llvm.asc && \
     . /etc/os-release && \
     echo "deb [signed-by=/etc/apt/keyrings/ros.asc] http://mirrors.ustc.edu.cn/ros/ubuntu/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/ros-latest.list && \
+    echo "deb [signed-by=/etc/apt/keyrings/llvm.asc] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-16 main" > /etc/apt/sources.list.d/llvm-16.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
+        clangd-16 \
+        clang-format-16 \
         ros-${ROS_VERSION}-ros-base \
         ros-${ROS_VERSION}-nav-msgs \
         ros-${ROS_VERSION}-sensor-msgs \
@@ -93,6 +99,7 @@ RUN install -d -m 0755 /etc/apt/keyrings && \
         ros-${ROS_VERSION}-message-filters \
         ros-${ROS_VERSION}-tf \
         ros-${ROS_VERSION}-catkin \
+        python3-catkin-tools \
         ros-${ROS_VERSION}-roslint \
         ros-${ROS_VERSION}-ddynamic-reconfigure \
         ros-${ROS_VERSION}-vrpn \
@@ -104,6 +111,10 @@ RUN install -d -m 0755 /etc/apt/keyrings && \
         ros-${ROS_VERSION}-eigen-conversions \
         ros-${ROS_VERSION}-visualization-msgs \
         ros-${ROS_VERSION}-vrpn-client-ros && \
+    update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-16 160 && \
+    update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-16 160 && \
+    update-alternatives --set clangd /usr/bin/clangd-16 && \
+    update-alternatives --set clang-format /usr/bin/clang-format-16 && \
     echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc
 
 # FAST-LIVO2 requires the legacy, non-templated Sophus API. The two setter

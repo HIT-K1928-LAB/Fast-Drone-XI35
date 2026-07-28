@@ -38,9 +38,11 @@ RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.tuna.tsinghua
     printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries && \
     install -d -m 0755 /etc/apt/keyrings && \
     wget -q --tries=5 --waitretry=5 --timeout=30 --read-timeout=30 --retry-connrefused https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc -O /etc/apt/keyrings/ros.asc && \
+    wget -q --tries=5 --waitretry=5 --timeout=30 --read-timeout=30 --retry-connrefused https://apt.llvm.org/llvm-snapshot.gpg.key -O /etc/apt/keyrings/llvm.asc && \
     wget -q --tries=5 --waitretry=5 --timeout=30 --read-timeout=30 --retry-connrefused "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xFB0B24895113F120" -O /etc/apt/keyrings/librealsense.asc && \
     . /etc/os-release && \
     echo "deb [signed-by=/etc/apt/keyrings/ros.asc] http://mirrors.ustc.edu.cn/ros/ubuntu/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/ros-latest.list && \
+    echo "deb [signed-by=/etc/apt/keyrings/llvm.asc] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-16 main" > /etc/apt/sources.list.d/llvm-16.list && \
     echo "deb [signed-by=/etc/apt/keyrings/librealsense.asc] https://librealsense.intel.com/Debian/apt-repo ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/librealsense.list
 
 # Install apt packages
@@ -66,8 +68,8 @@ RUN apt-get update && \
     libtool \
     htop \
     gdb \
-    clangd-18 \
-    clang-format-18 \
+    clangd-16 \
+    clang-format-16 \
     zip unzip \
     libdw-dev \
     libatlas-base-dev \
@@ -90,6 +92,7 @@ RUN apt-get update && \
     ros-${ROS_VERSION}-message-filters \
     ros-${ROS_VERSION}-tf \
     ros-${ROS_VERSION}-catkin \
+    python3-catkin-tools \
     ros-${ROS_VERSION}-roslint \
     ros-${ROS_VERSION}-ddynamic-reconfigure \
     ros-${ROS_VERSION}-vrpn \
@@ -114,10 +117,10 @@ RUN apt-get update && \
     libgstreamer-plugins-good1.0-dev \
     ros-${ROS_VERSION}-camera-calibration-parsers \
     ros-${ROS_VERSION}-camera-info-manager && \
-    update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-18 180 && \
-    update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 180 && \
-    update-alternatives --set clangd /usr/bin/clangd-18 && \
-    update-alternatives --set clang-format /usr/bin/clang-format-18 && \
+    update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-16 160 && \
+    update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-16 160 && \
+    update-alternatives --set clangd /usr/bin/clangd-16 && \
+    update-alternatives --set clang-format /usr/bin/clang-format-16 && \
     apt-mark hold librealsense2 librealsense2-dev librealsense2-utils librealsense2-dbg && \
     ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \

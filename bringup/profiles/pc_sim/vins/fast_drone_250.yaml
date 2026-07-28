@@ -1,0 +1,143 @@
+%YAML:1.0
+
+#common parameters
+#support: 1 imu 1 cam; 1 imu 2 cam: 2 cam;
+imu: 1
+num_of_cam: 2
+
+imu_topic: "/iris_0/imu_gazebo"
+image0_topic: "/iris_0/stereo_camera/left/image_raw"
+image1_topic: "/iris_0/stereo_camera/right/image_raw"
+output_path: "/root/Fast-Drone-XI35/vins_output"
+
+cam0_calib: "left.yaml"
+cam1_calib: "right.yaml"
+image_width: 640
+image_height: 480
+
+# Extrinsic parameter between IMU and Camera.
+estimate_extrinsic: 0   # 0  Have an accurate extrinsic parameters. We will trust the following imu^R_cam, imu^T_cam, don't change it.
+                        # 1  Have an initial guess about extrinsic parameters. We will optimize around your initial guess.
+
+body_T_cam0: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data:  [0, 0, 1, 0,
+           -1, 0, 0, 0.06,
+           0, -1, 0, -0.3,
+           0, 0, 0, 1.]
+
+
+body_T_cam1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data:  [0, 0, 1, 0,
+           -1, 0, 0, -0.06,
+           0, -1, 0, -0.3,
+           0, 0, 0, 1.]
+
+#Multiple thread support
+multiple_thread: 1
+use_gpu: 1
+use_gpu_acc_flow: 1
+
+#feature traker paprameters
+max_cnt: 150            # max feature number in feature tracking
+min_dist: 30            # min distance between two features 30
+freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image
+F_threshold: 1.0        # ransac threshold (pixel)
+show_track: 1           # publish tracking image as topic
+flow_back: 1            # perform forward and backward optical flow to improve feature tracking accuracy
+
+#optimization parameters
+max_solver_time: 0.04  # max solver itration time (ms), to guarantee real time
+max_num_iterations: 8   # max solver itrations, to guarantee real time
+keyframe_parallax: 10.0 # keyframe selection threshold (pixel)
+
+#imu parameters       The more accurate parameters you provide, the better performance
+acc_n: 0.1          # accelerometer measurement noise standard deviation. #0.2   0.04
+gyr_n: 0.01         # gyroscope measurement noise standard deviation.     #0.05  0.004
+acc_w: 0.001         # accelerometer bias random work noise standard deviation.  #0.002
+gyr_w: 0.0001       # gyroscope bias random work noise standard deviation.     #4.0e-5
+g_norm: 9.8066         # gravity magnitude
+
+#unsynchronization parameters
+estimate_td: 1                      # online estimate time offset between camera and imu
+td: -0.001                           # -0.001 initial value of time offset. unit: s. readed image clock + td = real image clock (IMU clock)
+
+#loop closure parameters
+load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
+pose_graph_save_path: "/home/orin02/savedfiles/output/pose_graph/" # save and load path
+save_image: 1                   # save image in pose graph for visualization prupose; you can close this function by setting 0
+
+odometry_type: 0 #0为原始里程计，1为加了偏置后的里程计
+drone_id: 1
+single_offset: 2.0
+
+enable_pub_imu_path: 1 #发布里程计轨迹
+
+enable_imu_odom_smooth: 1   #平滑imu里程计
+velocity_limit: 1.5
+
+enable_ex_prior: 0  #对外参施加先验
+ex_prior_sqrt_info: 10000  #外参先验因子权重 5000
+
+use_external_front_end: 1 #0：前端使用自带的光流跟踪，1：使用外部特征跟踪器
+
+record_csv: 0 #记录滑窗优化最新帧的时间戳、滑窗内可用的特征点数目、xyz、td
+csv_file_path: "/home/nx05/csv/vins_backend/xp_opticalflow_retrack.csv" #sp_opticalflow.csv, sp_lg_version.csv, original_version.csv, xp_opticalflow.csv
+
+#superpoint & light glue
+plnet:
+    use_opticalflow: 1 #0：匹配使用lightglue 1：使用光流
+    use_superpoint: 2   #1: superpoint 2: xfeat
+    use_retrack: 1 #1: 使用描述子匹配进行重跟踪
+    max_keypoints: 300  #200 250 sp或xfeat提取特征点数量上限
+    keypoint_threshold: 0.1 #0.004 0.001 for superpoint 0.05 ~ 0.1for xfeat
+    remove_borders: 4
+    dist_thresh: 20 #nms dist
+    line_threshold: 0.75
+    line_length_threshold: 50
+    pub_freq: 10
+    show_track: 3 #0：不显示，1：显示左目与上一帧匹配结果，2：显示左右目匹配结果 3：可视化左目特征点追踪次数
+    use_opticalflow_stereo: 1 #0：左右目匹配使用superpoint+lightglue 1：左右目匹配使用光流 （左目跟踪采用光流的情况下此选项无效）
+
+    record_csv: 0 # 记录当前帧成功追踪的特征点数量
+    csv_file_path: "/home/nx05/csv/vins-frontend/xp_opticalflow_retrack.csv" # xp_opticalflow.csv
+
+    of_max_cnt: 150 # max feature number in feature tracking for opticalflow 200
+    of_min_dist: 20 # min distance between two features for opticalflow 光流nms半径 20
+
+    superpoint_onnx_model: "superpoint_v1_sim_int32.onnx"
+    superpoint_trt_model: "superpoint_v1_sim_int32.engine"
+    xfeat_onnx_model: "xfeat.onnx"
+    xfeat_trt_model: "xfeat.engine"
+    plnet_s0_onnx_model: "plnet_s0.onnx"
+    plnet_s0_trt_model: "plnet_s0.engine"
+    plnet_s1_onnx_model: "plnet_s1.onnx"
+    plnet_s1_trt_model: "plnet_s1.engine"
+
+#opticalflow with xfeat
+xfeat_opticalflow:
+    max_search_dist: 100 #搜寻最近成功点的最大搜寻距离，超过这个距离视为搜寻失败
+    max_roi_len: 40 #预测点的最大ROI边长
+    min_match_dist: 0.9 #匹配成功的最小余弦距离
+    roi_pts_threshold: 0.1 #roi内视为特征点的heatmap阈值
+    ratio_test_threshold: 1
+
+point_matcher:
+    matcher: 0   # 0 for lightglue
+    F_threshold: 1.0 # 3.0
+    image_width: 640
+    image_height: 480
+    onnx_file: "superpoint_lightglue.onnx"
+    engine_file: "superpoint_lightglue.engine"
+
+# ZUPT
+use_zupt: 0
+enable_zupt_debug_log: 0
+zupt_acc_n: 10000.0
+zupt_gyr_n: 0.01
+zupt_vel_n: 0.0

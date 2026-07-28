@@ -53,10 +53,14 @@ void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
     read_essential_param(
         nh, "thrust_model/imu_acc_lpf_freq_cutoff", thr_map.imu_acc_lpf_freq_cutoff);
 
+    read_essential_param(nh, "mavros/namespace", mavros_ns);
     read_essential_param(nh, "mavros/bat_msg_freq", mavros_bat_msg_freq);
     read_essential_param(nh, "mavros/battery_id", mavros_battery_id);
     read_essential_param(nh, "mavros/attitude_msg_freq", mavros_attitude_msg_freq);
     read_essential_param(nh, "mavros/attitude_id", mavros_attitude_id);
+    read_essential_param(
+        nh, "mavros/attitude_quaternion_msg_freq", mavros_attitude_quaternion_msg_freq);
+    read_essential_param(nh, "mavros/attitude_quaternion_id", mavros_attitude_quaternion_id);
     read_essential_param(nh, "mavros/highres_imu_msg_freq", mavros_highres_imu_msg_freq);
     read_essential_param(nh, "mavros/highres_imu_id", mavros_highres_imu_id);
 
