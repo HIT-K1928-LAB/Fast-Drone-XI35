@@ -107,7 +107,10 @@ fi
 # =============================================================================
 # 用户维护区域
 # =============================================================================
-# 通常，仅在添加程序或调整程序排列时编辑此部分。
+# 这里只放所有 profile 共用的默认环境、启动模块和 tmux 布局。
+# 添加程序或调整默认窗口排列时可以编辑此部分。
+# 单个机型或仿真的环境与布局应放在对应 profile 的
+# flight_profile.sh 中，不要修改下方的运行时框架。
 #
 # Public helpers:
 #   new_window "window_name" "command" run_mode ["command" run_mode ...]
@@ -124,11 +127,13 @@ fi
 #       "bash '$WORKSPACE/bringup/commands/land.sh'" manual
 # =============================================================================
 
+# 所有 profile 共用的环境变量。
 setup_common_environment() {
     export ROS_LOG_DIR="$WORKSPACE/log"
     mkdir -p "$ROS_LOG_DIR"
 }
 
+# 默认布局使用的模块启动函数。
 start_localization() {
     case "$LOCALIZATION" in
         vins_stereo)
@@ -186,6 +191,7 @@ start_services() {
         auto
 }
 
+# 未配置 FLIGHT_PROFILE_SCRIPT 时使用的默认布局入口。
 build_default_user_layout() {
     start_localization
     start_control
@@ -197,6 +203,56 @@ build_default_user_layout() {
 # Everything below is runtime plumbing and normally does not need editing.
 # =============================================================================
 
+load_profile_definition() {
+    local profile_env="${1:?Missing profile environment file}"
+
+    # A profile script is opt-in. Do not inherit either the setting or hook
+    # functions from the shell that launched flight.sh.
+    unset FLIGHT_PROFILE_SCRIPT
+    unset -f setup_profile_environment build_user_layout 2>/dev/null || true
+
+    # shellcheck source=/dev/null
+    source "$profile_env"
+
+    if [ -z "${FLIGHT_PROFILE_SCRIPT:-}" ]; then
+        FLIGHT_PROFILE_SCRIPT_FILE=""
+        return
+    fi
+
+    case "$FLIGHT_PROFILE_SCRIPT" in
+        /*)
+            FLIGHT_PROFILE_SCRIPT_FILE="$FLIGHT_PROFILE_SCRIPT"
+            ;;
+        *)
+            FLIGHT_PROFILE_SCRIPT_FILE="$WORKSPACE/$FLIGHT_PROFILE_SCRIPT"
+            ;;
+    esac
+
+    if [ ! -f "$FLIGHT_PROFILE_SCRIPT_FILE" ]; then
+        echo "Flight profile script not found: $FLIGHT_PROFILE_SCRIPT_FILE" >&2
+        echo "Configured by FLIGHT_PROFILE_SCRIPT in $profile_env" >&2
+        exit 1
+    fi
+    if [ ! -r "$FLIGHT_PROFILE_SCRIPT_FILE" ]; then
+        echo "Flight profile script is not readable: $FLIGHT_PROFILE_SCRIPT_FILE" >&2
+        exit 1
+    fi
+
+    # The script is sourced so its hooks can use profile.env variables and
+    # override the built-in layout functions in this shell.
+    # shellcheck source=/dev/null
+    source "$FLIGHT_PROFILE_SCRIPT_FILE"
+}
+
+setup_loaded_profile_environment() {
+    source "$WORKSPACE/devel/setup.bash" >/dev/null
+    setup_common_environment
+
+    if declare -F setup_profile_environment >/dev/null; then
+        setup_profile_environment
+    fi
+}
+
 # Internal mode used by tmux to create a clean, profile-aware pane shell.
 if [ "${1:-}" = "--pane-shell" ]; then
     PANE_WORKSPACE="${2:?Missing workspace path}"
@@ -204,6 +260,7 @@ if [ "${1:-}" = "--pane-shell" ]; then
     READY_SIGNAL="${4:?Missing tmux ready signal}"
     LAYOUT_GATE="${5:?Missing layout-ready gate}"
     PANE_PROFILE_DIR="$PANE_WORKSPACE/bringup/profiles/$PANE_PROFILE"
+    PANE_PROFILE_ENV="$PANE_PROFILE_DIR/profile.env"
 
     shift 5
     if [ "$#" -eq 0 ] || [ $(( $# % 2 )) -ne 0 ]; then
@@ -211,21 +268,28 @@ if [ "${1:-}" = "--pane-shell" ]; then
         exit 64
     fi
 
-    source "$PANE_PROFILE_DIR/profile.env"
-    source "$PANE_WORKSPACE/devel/setup.bash" >/dev/null
-    setup_common_environment
+    WORKSPACE="$PANE_WORKSPACE"
+    PROFILE="$PANE_PROFILE"
+    PROFILE_DIR="$PANE_PROFILE_DIR"
+    PROFILE_ENV="$PANE_PROFILE_ENV"
+
+    load_profile_definition "$PROFILE_ENV"
+    setup_loaded_profile_environment
 
     export ROS_MASTER_URI="$ROS_MASTER_URI_DEFAULT"
     export ROS_IP="$ROS_IP_DEFAULT"
-    export FASTDRONE_PROFILE="$PANE_PROFILE"
-    export FASTDRONE_PROFILE_DIR="$PANE_PROFILE_DIR"
+    export WORKSPACE
+    export PROFILE
+    export PROFILE_DIR
+    export FASTDRONE_PROFILE="$PROFILE"
+    export FASTDRONE_PROFILE_DIR="$PROFILE_DIR"
     VINS_CONFIG_FILE=""
     PX4CTRL_CONFIG_FILE=""
     if [ -n "${VINS_CONFIG:-}" ]; then
-        VINS_CONFIG_FILE="$PANE_PROFILE_DIR/$VINS_CONFIG"
+        VINS_CONFIG_FILE="$PROFILE_DIR/$VINS_CONFIG"
     fi
     if [ -n "${PX4CTRL_CONFIG:-}" ]; then
-        PX4CTRL_CONFIG_FILE="$PANE_PROFILE_DIR/$PX4CTRL_CONFIG"
+        PX4CTRL_CONFIG_FILE="$PROFILE_DIR/$PX4CTRL_CONFIG"
     fi
     export VINS_CONFIG_FILE
     export PX4CTRL_CONFIG_FILE
@@ -287,7 +351,14 @@ if [ ! -f "$PROFILE_ENV" ]; then
     exit 1
 fi
 
-source "$PROFILE_ENV"
+load_profile_definition "$PROFILE_ENV"
+
+if [ ! -f "$WORKSPACE/devel/setup.bash" ]; then
+    echo "Required file not found: $WORKSPACE/devel/setup.bash" >&2
+    exit 1
+fi
+
+setup_loaded_profile_environment
 
 : "${ROS_MASTER_URI_DEFAULT:?ROS_MASTER_URI_DEFAULT is not set in $PROFILE_ENV}"
 : "${ROS_IP_DEFAULT:?ROS_IP_DEFAULT is not set in $PROFILE_ENV}"
@@ -304,7 +375,7 @@ if [ -n "${PX4CTRL_CONFIG:-}" ]; then
     PX4CTRL_CONFIG_FILE="$PROFILE_DIR/$PX4CTRL_CONFIG"
 fi
 
-if [ -z "${FLIGHT_LAYOUT_SCRIPT:-}" ]; then
+if [ -z "${FLIGHT_PROFILE_SCRIPT:-}" ]; then
     : "${VINS_CONFIG:?VINS_CONFIG is required by the built-in layout in $PROFILE_ENV}"
     : "${PX4CTRL_CONFIG:?PX4CTRL_CONFIG is required by the built-in layout in $PROFILE_ENV}"
     BUILTIN_LAYOUT_REQUIRED_FILES=("$VINS_CONFIG_FILE" "$PX4CTRL_CONFIG_FILE")
@@ -312,7 +383,7 @@ else
     BUILTIN_LAYOUT_REQUIRED_FILES=()
 fi
 
-for required_file in "${BUILTIN_LAYOUT_REQUIRED_FILES[@]}" "$WORKSPACE/devel/setup.bash"; do
+for required_file in "${BUILTIN_LAYOUT_REQUIRED_FILES[@]}"; do
     if [ ! -f "$required_file" ]; then
         echo "Required file not found: $required_file" >&2
         exit 1
@@ -440,39 +511,16 @@ add_pane() {
     tmux select-layout -t "$SESSION:$window" tiled >/dev/null
 }
 
-# A profile may replace the built-in tmux layout with a shell file of its own.
-# Relative paths are resolved from the workspace root. The file is sourced only
-# after every public layout helper has been defined.
-if [ -n "${FLIGHT_LAYOUT_SCRIPT:-}" ]; then
-    case "$FLIGHT_LAYOUT_SCRIPT" in
-        /*)
-            FLIGHT_LAYOUT_SCRIPT_FILE="$FLIGHT_LAYOUT_SCRIPT"
-            ;;
-        *)
-            FLIGHT_LAYOUT_SCRIPT_FILE="$WORKSPACE/$FLIGHT_LAYOUT_SCRIPT"
-            ;;
-    esac
-
-    if [ ! -f "$FLIGHT_LAYOUT_SCRIPT_FILE" ]; then
-        echo "Flight layout script not found: $FLIGHT_LAYOUT_SCRIPT_FILE" >&2
-        echo "Configured by FLIGHT_LAYOUT_SCRIPT in $PROFILE_ENV" >&2
-        exit 1
-    fi
-    if [ ! -r "$FLIGHT_LAYOUT_SCRIPT_FILE" ]; then
-        echo "Flight layout script is not readable: $FLIGHT_LAYOUT_SCRIPT_FILE" >&2
-        exit 1
-    fi
-
-    unset -f build_user_layout 2>/dev/null || true
-    # shellcheck source=/dev/null
-    source "$FLIGHT_LAYOUT_SCRIPT_FILE"
+# A profile script may add environment variables and replace the built-in tmux
+# layout. Without FLIGHT_PROFILE_SCRIPT the built-in layout remains unchanged.
+if [ -n "${FLIGHT_PROFILE_SCRIPT:-}" ]; then
     if ! declare -F build_user_layout >/dev/null; then
-        echo "Flight layout script must define build_user_layout():" >&2
-        echo "  $FLIGHT_LAYOUT_SCRIPT_FILE" >&2
+        echo "Flight profile script must define build_user_layout():" >&2
+        echo "  $FLIGHT_PROFILE_SCRIPT_FILE" >&2
         exit 64
     fi
 else
-    FLIGHT_LAYOUT_SCRIPT_FILE="built-in default"
+    FLIGHT_PROFILE_SCRIPT_FILE="built-in default"
     build_user_layout() {
         build_default_user_layout
     }
@@ -492,7 +540,7 @@ STATUS_COMMAND="printf '\n  Fast-Drone flight session\n\n  %-14s : %s\n  %-14s :
 'ROS master' '$ROS_MASTER_URI' \
 'ROS IP' '$ROS_IP' \
 'Profile dir' '$PROFILE_DIR' \
-'Layout script' '$FLIGHT_LAYOUT_SCRIPT_FILE' \
+'Profile script' '$FLIGHT_PROFILE_SCRIPT_FILE' \
 'VINS config' '$VINS_CONFIG_STATUS' \
 'PX4Ctrl config' '$PX4CTRL_CONFIG_STATUS' \
 'Git branch' '$GIT_BRANCH' \

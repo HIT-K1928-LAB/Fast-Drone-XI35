@@ -68,10 +68,13 @@ class Parameter_t {
     // bool print_dbg;
 
     // mavros params
+    std::string mavros_ns;
     int mavros_battery_id;
     float mavros_bat_msg_freq;
     int mavros_attitude_id;
     float mavros_attitude_msg_freq;
+    int mavros_attitude_quaternion_id;
+    float mavros_attitude_quaternion_msg_freq;
     int mavros_highres_imu_id;
     float mavros_highres_imu_msg_freq;
 

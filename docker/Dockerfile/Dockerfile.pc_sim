@@ -1,0 +1,98 @@
+ARG PC_BASE_IMAGE=fastdronexi35:pc
+FROM ${PC_BASE_IMAGE}
+
+LABEL org.opencontainers.image.authors="zhangrun <1139135655@qq.com>"
+LABEL org.opencontainers.image.description="Fast-Drone PC simulation environment with PX4 SITL and Gazebo 11"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+ARG USE_PROXY=false
+ARG BUILD_HTTP_PROXY
+ARG BUILD_HTTPS_PROXY
+ARG ROS_VERSION=noetic
+ARG WGET_RETRY_OPTS="--quiet --tries=5 --waitretry=5 --timeout=30 --read-timeout=30 --retry-connrefused"
+ARG PIP_RETRY_OPTS="--retries 5 --timeout 60 --no-cache-dir"
+ARG NO_PROXY="localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn,mirrors.ustc.edu.cn"
+
+ENV http_proxy=${BUILD_HTTP_PROXY} \
+    https_proxy=${BUILD_HTTPS_PROXY} \
+    HTTP_PROXY=${BUILD_HTTP_PROXY} \
+    HTTPS_PROXY=${BUILD_HTTPS_PROXY} \
+    no_proxy=${NO_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    DEBIAN_FRONTEND=noninteractive
+
+# Gazebo 11, PX4 SITL build tools, and ROS dependencies used by simulation.
+# Dockerfile.pc already provides pkg-config, Eigen, GStreamer development
+# libraries, python3-pip, and camera-info-manager.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gazebo11 \
+        libgazebo11-dev \
+        mesa-utils \
+        ninja-build \
+        libimage-exiftool-perl \
+        protobuf-compiler \
+        genromfs \
+        xmlstarlet \
+        python3-venv \
+        python3-dev \
+        gawk \
+        ros-${ROS_VERSION}-rqt-image-view \
+        ros-${ROS_VERSION}-moveit-msgs \
+        ros-${ROS_VERSION}-object-recognition-msgs \
+        ros-${ROS_VERSION}-octomap-msgs \
+        ros-${ROS_VERSION}-control-toolbox \
+        ros-${ROS_VERSION}-polled-camera \
+        ros-${ROS_VERSION}-controller-manager \
+        ros-${ROS_VERSION}-transmission-interface \
+        ros-${ROS_VERSION}-joint-limits-interface && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install VirtualGL from its official APT repository.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gnupg \
+        wget && \
+    wget ${WGET_RETRY_OPTS} -O /tmp/virtualgl.asc \
+        https://packagecloud.io/dcommander/virtualgl/gpgkey && \
+    gpg --dearmor --batch --yes \
+        -o /etc/apt/trusted.gpg.d/VirtualGL.gpg \
+        /tmp/virtualgl.asc && \
+    wget ${WGET_RETRY_OPTS} \
+        -O /etc/apt/sources.list.d/VirtualGL.list \
+        https://raw.githubusercontent.com/VirtualGL/repo/main/VirtualGL.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends virtualgl && \
+    rm -f /tmp/virtualgl.asc && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python tools required by the PX4 v1.13 SITL build.
+RUN /usr/bin/python3 -m pip install ${PIP_RETRY_OPTS} \
+        pandas \
+        jinja2 \
+        pyserial \
+        cerberus \
+        pyulog==0.7.0 \
+        numpy \
+        toml \
+        pyquaternion \
+        empy==3.3.4 \
+        pyyaml \
+        packaging \
+        kconfiglib \
+        jsonschema \
+        future
+
+RUN apt-get clean && \
+    rm -rf /var/tmp/* /var/lib/apt/lists/* /var/cache/apt/* /tmp/*
+
+ENV http_proxy= \
+    https_proxy= \
+    HTTP_PROXY= \
+    HTTPS_PROXY=
+
+WORKDIR /root

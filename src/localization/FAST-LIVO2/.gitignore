@@ -1,0 +1,7 @@
+Log/*
+!Log/guide.md
+!Log/plot.py
+build/
+
+# Documentation artifact; the source tree and runtime do not use it.
+Supplementary/*.pdf

@@ -1,10 +1,13 @@
 build
 devel
+compile_commands.json
 .catkin_workspace
 .vscode
 log
 logs
 .catkin_tools
+.cache
+/docker/TensorRT*
 
 # Python bytecode caches.
 __pycache__/

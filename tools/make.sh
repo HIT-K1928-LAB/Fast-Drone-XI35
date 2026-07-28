@@ -163,6 +163,37 @@ parse_build_options() {
   done
 }
 
+merge_compile_commands() {
+  python3 - "${WORKSPACE_ROOT}" <<'PY'
+import glob
+import json
+import os
+import sys
+
+workspace = sys.argv[1]
+databases = sorted(glob.glob(os.path.join(workspace, "build", "*", "compile_commands.json")))
+commands_by_file = {}
+
+for database in databases:
+    with open(database, encoding="utf-8") as stream:
+        for command in json.load(stream):
+            source = command.get("file")
+            if not source:
+                continue
+            if not os.path.isabs(source):
+                source = os.path.normpath(os.path.join(command.get("directory", ""), source))
+            commands_by_file[source] = command
+
+output = os.path.join(workspace, "compile_commands.json")
+temporary = output + ".tmp"
+with open(temporary, "w", encoding="utf-8") as stream:
+    json.dump(list(commands_by_file.values()), stream, indent=2)
+    stream.write("\n")
+os.replace(temporary, output)
+print(f"Merged {len(commands_by_file)} entries from {len(databases)} databases into {output}")
+PY
+}
+
 run_catkin_build() {
   local cmd=(catkin build)
   local config_cmd=(catkin config --workspace "${WORKSPACE_ROOT}" --log-space "${CATKIN_LOG_SPACE}")
@@ -206,6 +237,10 @@ run_catkin_build() {
   cd "${WORKSPACE_ROOT}"
   "${config_cmd[@]}"
   "${cmd[@]}"
+
+  if [[ "${EXPORT_COMPILE_COMMANDS}" == true ]]; then
+    merge_compile_commands
+  fi
 }
 
 build_all() {
@@ -317,6 +352,9 @@ EOF
 
   cd "${WORKSPACE_ROOT}"
   "${cmd[@]}"
+  if [[ "${dry_run}" == false && "${clean_build}" == true ]]; then
+    rm -f "${WORKSPACE_ROOT}/compile_commands.json"
+  fi
 }
 
 print_completion() {
