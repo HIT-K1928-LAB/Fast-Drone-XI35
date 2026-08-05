@@ -221,3 +221,7 @@ rosbag play your_dataset.bag
 ```
 
 ⚠️ 注意第一次运行前端superpoint_frontend.launch会卡住，是正常现象，内部在进行跨平台的.onnx文件构建，等待3~4分钟即可正常运行，下一次也可正常启动。
+
+### gazebo仿真镜像
+
+在fastdrone_xi35:pc镜像存在的基础下，在Dockerfile文件夹下 make pc_sim

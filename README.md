@@ -10,6 +10,23 @@
 git clone git@github.com:HIT-K1928-LAB/Fast-Drone-XI35.git
 ```
 
+### 构建Docker环境
+
+参考[Docker指南](docker/README.md)，在docker/Dockerfile目录
+
+- jetson平台
+
+``` bash
+make jetson
+```
+
+- pc 平台
+
+``` bash
+make pc
+make pc_sim
+```
+
 ### 编译代码
 
 在项目主目录运行脚本
@@ -22,7 +39,7 @@ git clone git@github.com:HIT-K1928-LAB/Fast-Drone-XI35.git
 初始化仿真环境模块仓库
 
 ``` bash
-git submodule update --init --recursive -- \
+git submodule update --init --recursive --progress -- \
   third_party/px4_sitl \
   src/simulation/xtdrone \
   src/simulation/gazebo_models
