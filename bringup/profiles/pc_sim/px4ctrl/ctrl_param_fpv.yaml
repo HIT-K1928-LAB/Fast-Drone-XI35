@@ -20,7 +20,7 @@ rc_reverse:
 auto_takeoff_land:
     enable: true
     enable_auto_arm: true
-    no_RC: false
+    no_RC: true
     takeoff_height: 1.0 # m
     takeoff_land_speed: 0.2 # m/s
 

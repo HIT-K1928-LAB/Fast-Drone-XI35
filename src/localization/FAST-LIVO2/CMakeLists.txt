@@ -85,6 +85,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   pcl_ros
   tf
+  livox_ros_driver2
   eigen_conversions
   vikit_common
   vikit_ros
@@ -104,7 +105,22 @@ find_package(Boost REQUIRED COMPONENTS thread)
 
 # Define the catkin package
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs sensor_msgs roscpp rospy std_msgs pcl_ros tf eigen_conversions vikit_common vikit_ros cv_bridge_454 image_transport visualization_msgs
+  CATKIN_DEPENDS
+    geometry_msgs
+    nav_msgs
+    sensor_msgs
+    roscpp
+    rospy
+    std_msgs
+    pcl_ros
+    tf
+    livox_ros_driver2
+    eigen_conversions
+    vikit_common
+    vikit_ros
+    cv_bridge_454
+    image_transport
+    visualization_msgs
   DEPENDS EIGEN3 PCL OpenCV Sophus
 )
 
@@ -127,6 +143,11 @@ add_library(laser_mapping src/LIVMapper.cpp)
 
 # Add the main executable
 add_executable(fastlivo_mapping src/main.cpp)
+
+# Ensure livox_ros_driver2 message headers exist before compiling subscribers.
+add_dependencies(pre ${catkin_EXPORTED_TARGETS})
+add_dependencies(laser_mapping ${catkin_EXPORTED_TARGETS})
+add_dependencies(fastlivo_mapping ${catkin_EXPORTED_TARGETS})
 
 # Link libraries to the executable
 target_link_libraries(fastlivo_mapping

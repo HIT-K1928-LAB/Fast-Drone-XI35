@@ -1,7 +1,7 @@
 import argparse
 import sys
 import time
-from typing import List
+from typing import List, Optional, Tuple
 
 import pygame
 from pymavlink import mavutil
@@ -42,6 +42,14 @@ REV_CH7 = False
 REV_CH8 = False
 
 SEND_HZ = 50
+RECONNECT_INTERVAL = 1.0
+
+# RadioMaster 未连接时持续发布的安全默认值：
+# 横滚/俯仰/偏航居中，油门最低，辅助通道置低。
+DEFAULT_CHANNELS: Tuple[int, ...] = (
+    1500, 1500, 1000, 1500,
+    1000, 1000, 1000, 1000,
+)
 
 # 摇杆设备名包含这个字符串时优先选择
 # 不确定的话可以留空：PREFERRED_NAME = ""
@@ -95,32 +103,40 @@ def switch_axis_to_pwm(v: float, reverse: bool = False) -> int:
         return 1500
 
 
-def init_joystick(preferred_name: str = ""):
+def init_joystick_system():
     pygame.init()
     pygame.joystick.init()
 
+
+def find_joystick(preferred_name: str = "") -> Optional[object]:
+    """查找指定的 joystick；找不到时返回 None，等待后续热插拔。"""
     count = pygame.joystick.get_count()
-    if count == 0:
-        raise RuntimeError("没有检测到 joystick。请确认 RadioMaster 已选择 USB Joystick/HID 模式。")
-
-    selected_index = 0
-
-    print("Detected joysticks:")
     for i in range(count):
-        j = pygame.joystick.Joystick(i)
-        j.init()
-        name = j.get_name()
-        print(f"  [{i}] {name}, axes={j.get_numaxes()}, buttons={j.get_numbuttons()}, hats={j.get_numhats()}")
+        try:
+            joy = pygame.joystick.Joystick(i)
+            joy.init()
+            name = joy.get_name()
+        except pygame.error:
+            continue
 
-        if preferred_name and preferred_name.lower() in name.lower():
-            selected_index = i
+        # 指定名称时只使用匹配设备，避免 RadioMaster 缺席时误用其他手柄。
+        if preferred_name and preferred_name.lower() not in name.lower():
+            joy.quit()
+            continue
 
-    joy = pygame.joystick.Joystick(selected_index)
-    joy.init()
+        print(f"\nUsing joystick [{i}]: {name}")
+        print(f"Axes={joy.get_numaxes()}, Buttons={joy.get_numbuttons()}, Hats={joy.get_numhats()}")
+        return joy
 
-    print(f"\nUsing joystick [{selected_index}]: {joy.get_name()}")
-    print(f"Axes={joy.get_numaxes()}, Buttons={joy.get_numbuttons()}, Hats={joy.get_numhats()}")
-    return joy
+    return None
+
+
+def get_instance_id(joy) -> Optional[int]:
+    try:
+        return joy.get_instance_id()
+    except AttributeError:
+        # 兼容较旧的 pygame
+        return None
 
 
 def get_axes(joy) -> List[float]:
@@ -133,14 +149,58 @@ def get_buttons(joy) -> List[int]:
     return [joy.get_button(i) for i in range(joy.get_numbuttons())]
 
 
-def debug_loop(joy):
+def debug_loop(preferred_name: str):
     print("\nDebug mode. Move sticks/switches and observe axis numbers.")
     print("Press Ctrl+C to exit.\n")
 
+    joy = None
+    joystick_instance_id = None
+    next_scan_time = 0.0
+    waiting_announced = False
+
     while True:
-        axes = [round(x, 3) for x in get_axes(joy)]
-        buttons = get_buttons(joy)
-        print(f"axes={axes} buttons={buttons}")
+        for event in pygame.event.get():
+            if event.type == pygame.JOYDEVICEADDED:
+                next_scan_time = 0.0
+            elif event.type == pygame.JOYDEVICEREMOVED and joy is not None:
+                removed_instance_id = getattr(event, "instance_id", None)
+                if (
+                    joystick_instance_id is None
+                    or removed_instance_id is None
+                    or removed_instance_id == joystick_instance_id
+                ):
+                    print("\nRadioMaster disconnected. Waiting for reconnection...")
+                    joy = None
+                    joystick_instance_id = None
+                    next_scan_time = 0.0
+                    waiting_announced = True
+
+        now = time.monotonic()
+        if joy is None and now >= next_scan_time:
+            joy = find_joystick(preferred_name)
+            next_scan_time = now + RECONNECT_INTERVAL
+            if joy is not None:
+                joystick_instance_id = get_instance_id(joy)
+                waiting_announced = False
+            elif not waiting_announced:
+                print("RadioMaster not found. Waiting for reconnection...")
+                waiting_announced = True
+
+        if joy is not None:
+            try:
+                if not joy.get_init():
+                    raise pygame.error("joystick is no longer initialized")
+                axes = [round(x, 3) for x in get_axes(joy)]
+                buttons = get_buttons(joy)
+                print(f"axes={axes} buttons={buttons}")
+            except pygame.error as e:
+                print(f"\nJoystick access failed: {e}")
+                print("Waiting for reconnection...")
+                joy = None
+                joystick_instance_id = None
+                next_scan_time = now + RECONNECT_INTERVAL
+                waiting_announced = True
+
         time.sleep(0.2)
 
 
@@ -150,6 +210,24 @@ def safe_get_axis(joy, axis_index: int) -> float:
             f"Axis index {axis_index} 超出范围。当前 joystick 只有 {joy.get_numaxes()} 个 axes。"
         )
     return joy.get_axis(axis_index)
+
+
+def read_rc_channels(joy) -> Tuple[int, ...]:
+    roll_axis = safe_get_axis(joy, AXIS_ROLL)
+    pitch_axis = safe_get_axis(joy, AXIS_PITCH)
+    throttle_axis = safe_get_axis(joy, AXIS_THROTTLE)
+    yaw_axis = safe_get_axis(joy, AXIS_YAW)
+
+    return (
+        axis_to_pwm(roll_axis, REV_ROLL),
+        axis_to_pwm(pitch_axis, REV_PITCH),
+        throttle_axis_to_pwm(throttle_axis, REV_THROTTLE),
+        axis_to_pwm(yaw_axis, REV_YAW),
+        switch_axis_to_pwm(safe_get_axis(joy, AXIS_CH5), REV_CH5),
+        switch_axis_to_pwm(safe_get_axis(joy, AXIS_CH6), REV_CH6),
+        switch_axis_to_pwm(safe_get_axis(joy, AXIS_CH7), REV_CH7),
+        switch_axis_to_pwm(safe_get_axis(joy, AXIS_CH8), REV_CH8),
+    )
 
 
 def send_release(mav):
@@ -175,7 +253,7 @@ def send_release(mav):
         time.sleep(0.02)
 
 
-def forward_loop(joy):
+def forward_loop(preferred_name: str):
     mav = mavutil.mavlink_connection(
         f"udpout:{SERVER_IP}:{SERVER_PORT}",
         source_system=250,
@@ -183,98 +261,67 @@ def forward_loop(joy):
         dialect="common"
     )
 
-    # Pygame 2 中用于识别当前 joystick
-    try:
-        joystick_instance_id = joy.get_instance_id()
-    except AttributeError:
-        # 兼容较旧的 pygame
-        joystick_instance_id = None
-
     print("\nForwarding RadioMaster to PX4 SITL")
     print(f"UDP target: {SERVER_IP}:{SERVER_PORT}")
     print(f"Target PX4: system={TARGET_SYSTEM}, component={TARGET_COMPONENT}")
-    print(f"Joystick instance ID: {joystick_instance_id}")
     print("Press Ctrl+C to stop.\n")
 
     dt = 1.0 / SEND_HZ
     i = 0
+    joy = None
+    joystick_instance_id = None
+    next_scan_time = 0.0
+    waiting_announced = False
 
     while True:
-        # 不要再只使用 pygame.event.pump()
-        # event.get() 会泵送并读取断联事件
         for event in pygame.event.get():
-
-            if event.type == pygame.JOYDEVICEREMOVED:
+            if event.type == pygame.JOYDEVICEADDED:
+                # 新设备加入后立即扫描，不必等到下一次定时轮询。
+                next_scan_time = 0.0
+            elif event.type == pygame.JOYDEVICEREMOVED and joy is not None:
                 removed_instance_id = getattr(event, "instance_id", None)
-
-                # 如果无法获取 instance ID，也按当前设备断联处理
                 if (
                     joystick_instance_id is None
                     or removed_instance_id is None
                     or removed_instance_id == joystick_instance_id
                 ):
                     print("\nRadioMaster disconnected.")
-                    print("Releasing RC override...")
+                    print("Switching to default RC values and waiting for reconnection...")
+                    joy = None
+                    joystick_instance_id = None
+                    next_scan_time = 0.0
+                    waiting_announced = True
 
-                    send_release(mav)
+        now = time.monotonic()
+        if joy is None and now >= next_scan_time:
+            joy = find_joystick(preferred_name)
+            next_scan_time = now + RECONNECT_INTERVAL
+            if joy is not None:
+                joystick_instance_id = get_instance_id(joy)
+                print(f"Joystick instance ID: {joystick_instance_id}")
+                print("RadioMaster connected. Publishing live RC values.")
+                waiting_announced = False
+            elif not waiting_announced:
+                print("RadioMaster not found.")
+                print("Publishing default RC values and waiting for reconnection...")
+                waiting_announced = True
 
-                    print("RC override released.")
-                    print("RC_CHANNELS_OVERRIDE publishing stopped.")
-                    return
-
-        # 再增加一层保险：
-        # 某些平台可能没有及时产生 JOYDEVICEREMOVED 事件
-        try:
-            if not joy.get_init():
-                print("\nJoystick is no longer initialized.")
-                print("Releasing RC override...")
-
-                send_release(mav)
-
-                print("RC override released.")
-                print("RC_CHANNELS_OVERRIDE publishing stopped.")
-                return
-
-            roll_axis = safe_get_axis(joy, AXIS_ROLL)
-            pitch_axis = safe_get_axis(joy, AXIS_PITCH)
-            throttle_axis = safe_get_axis(joy, AXIS_THROTTLE)
-            yaw_axis = safe_get_axis(joy, AXIS_YAW)
-
-            ch1 = axis_to_pwm(roll_axis, REV_ROLL)
-            ch2 = axis_to_pwm(pitch_axis, REV_PITCH)
-            ch3 = throttle_axis_to_pwm(
-                throttle_axis,
-                REV_THROTTLE
-            )
-            ch4 = axis_to_pwm(yaw_axis, REV_YAW)
-
-            ch5 = switch_axis_to_pwm(
-                safe_get_axis(joy, AXIS_CH5),
-                REV_CH5
-            )
-            ch6 = switch_axis_to_pwm(
-                safe_get_axis(joy, AXIS_CH6),
-                REV_CH6
-            )
-            ch7 = switch_axis_to_pwm(
-                safe_get_axis(joy, AXIS_CH7),
-                REV_CH7
-            )
-            ch8 = switch_axis_to_pwm(
-                safe_get_axis(joy, AXIS_CH8),
-                REV_CH8
-            )
-
-        except pygame.error as e:
-            # USB 断开后，get_axis() 在部分系统上会直接抛出 pygame.error
-            print(f"\nJoystick access failed: {e}")
-            print("Releasing RC override...")
-
-            send_release(mav)
-
-            print("RC override released.")
-            print("RC_CHANNELS_OVERRIDE publishing stopped.")
-            return
+        source = "DEFAULT"
+        channels = DEFAULT_CHANNELS
+        if joy is not None:
+            try:
+                if not joy.get_init():
+                    raise pygame.error("joystick is no longer initialized")
+                channels = read_rc_channels(joy)
+                source = "RadioMaster"
+            except (pygame.error, RuntimeError) as e:
+                # 部分平台不会及时产生 JOYDEVICEREMOVED，读取失败时同样切换默认值。
+                print(f"\nJoystick access failed: {e}")
+                print("Switching to default RC values and waiting for reconnection...")
+                joy = None
+                joystick_instance_id = None
+                next_scan_time = now + RECONNECT_INTERVAL
+                waiting_announced = True
 
         if i % SEND_HZ == 0:
             mav.mav.heartbeat_send(
@@ -286,27 +333,21 @@ def forward_loop(joy):
             )
 
             print(
-                f"CH1={ch1:4d} "
-                f"CH2={ch2:4d} "
-                f"CH3={ch3:4d} "
-                f"CH4={ch4:4d} "
-                f"CH5={ch5:4d} "
-                f"CH6={ch6:4d} "
-                f"CH7={ch7:4d} "
-                f"CH8={ch8:4d}"
+                f"source={source:<11} "
+                f"CH1={channels[0]:4d} "
+                f"CH2={channels[1]:4d} "
+                f"CH3={channels[2]:4d} "
+                f"CH4={channels[3]:4d} "
+                f"CH5={channels[4]:4d} "
+                f"CH6={channels[5]:4d} "
+                f"CH7={channels[6]:4d} "
+                f"CH8={channels[7]:4d}"
             )
 
         mav.mav.rc_channels_override_send(
             TARGET_SYSTEM,
             TARGET_COMPONENT,
-            ch1,
-            ch2,
-            ch3,
-            ch4,
-            ch5,
-            ch6,
-            ch7,
-            ch8
+            *channels
         )
 
         i += 1
@@ -316,16 +357,16 @@ def forward_loop(joy):
 def main():
     parser = argparse.ArgumentParser(description="RadioMaster USB Joystick to PX4 SITL RC override")
     parser.add_argument("--debug", action="store_true", help="只打印 joystick axes/buttons，不发送 MAVLink")
-    parser.add_argument("--name", default=PREFERRED_NAME, help="优先选择名称包含该字符串的 joystick")
+    parser.add_argument("--name", default=PREFERRED_NAME, help="只使用名称包含该字符串的 joystick；留空则使用第一个")
     args = parser.parse_args()
 
-    joy = init_joystick(args.name)
+    init_joystick_system()
 
     try:
         if args.debug:
-            debug_loop(joy)
+            debug_loop(args.name)
         else:
-            forward_loop(joy)
+            forward_loop(args.name)
     except KeyboardInterrupt:
         print("\nStopping...")
         if not args.debug:
