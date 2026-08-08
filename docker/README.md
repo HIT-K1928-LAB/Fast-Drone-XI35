@@ -1,5 +1,109 @@
 # Docker 使用
 
+## RK3588 + openEuler
+
+RK3588 上建议让 openEuler 作为宿主系统，容器使用 Ubuntu 20.04 ARM64
+用户态。这样可以直接使用 ROS Noetic 的官方二进制包，同时复用宿主机的
+Rockchip 内核、RKNPU、RGA 和 MPP 驱动。容器基础系统不需要与宿主系统相同。
+
+`Dockerfile.rk3588` 与现有镜像的主要差异：
+
+- CUDA、cuDNN 和 TensorRT 被移除；OpenCV 4.5.4/3.4.16 使用 CPU + NEON。
+- 安装 RKNN Toolkit Lite2 与 RKNN C Runtime 2.3.2。
+- librealsense 使用 RSUSB 后端从源码构建，不依赖 Ubuntu DKMS 内核模块。
+- 保留 ROS Noetic、MAVROS、Sophus、Ceres、LCM 和自定义 `cv_bridge_454`。
+
+### 宿主机检查
+
+```bash
+uname -m
+docker version
+readlink -f /sys/class/drm/renderD129/device/driver
+```
+
+RK3588 应输出 `aarch64`，且最后一个命令应指向 `RKNPU` 驱动。不同板卡镜像的
+设备编号可能不同；当前 openEuler 镜像使用 `/dev/dri/renderD129`。
+
+### 构建
+
+在 RK3588 板端执行原生 ARM64 构建：
+
+```bash
+cd Fast-Drone-XI35/docker/Dockerfile
+make rk3588 USE_PROXY=false SPEED=8
+```
+
+需要代理时沿用 PC/Jetson 的参数：
+
+```bash
+make rk3588 USE_PROXY=true CONTAINER_HTTP_PROXY=http://192.168.31.2:7897 \
+  CONTAINER_HTTPS_PROXY=http://192.168.31.2:7897
+```
+
+也可以在已经配置 ARM64 binfmt/QEMU 的 x86 服务器上交叉构建。先确认模拟器
+可执行 ARM64 容器：
+
+```bash
+docker run --rm --platform linux/arm64 alpine uname -m
+```
+
+输出 `aarch64` 后，在服务器上的工程目录执行：
+
+```bash
+cd Fast-Drone-XI35/docker/Dockerfile
+make rk3588 USE_PROXY=true SPEED=24 \
+  RK3588_PLATFORM=linux/arm64 RK3588_DOCKER_BUILDKIT=1
+docker image inspect fastdronexi35:rk3588 --format '{{.Architecture}}'
+```
+
+本项目已在 `k1928-c` 上按此方式构建并在 RK3588 上验证。QEMU 编译大型 C++
+依赖仍比原生编译慢，但可使用服务器的 CPU、内存和 Docker 缓存。`k1928-a`、
+`k1928-d` 或本机若未注册 ARM64 binfmt，会报 `exec format error`。
+
+构建完成后可通过镜像仓库，或用 SSH 流式传到板端：
+
+```bash
+ssh k1928-c 'docker save fastdronexi35:rk3588 | gzip -1' | \
+  ssh rk3588-01 'docker load'
+```
+
+镜像较大且链路延迟高时，使用内网镜像仓库或并行分片传输会更快。没有可用的
+ARM64 模拟器时，使用前面的 RK3588 原生构建命令。
+
+### 启动与 NPU 验证
+
+```bash
+cd Fast-Drone-XI35/docker/Dockerfile
+./container_run_rk3588.sh
+docker exec -it fd_runtime_rk3588 bash
+```
+
+启动脚本使用 `--privileged` 并映射 `/dev`，以透传 NPU、RGA、MPP、USB 相机和
+串口。RK3588 默认使用扩展口 UART7（`/dev/ttyS7:921600`）连接 PX4；可在创建
+容器时通过 `MAVROS_FCU_URL` 覆盖，例如：
+
+```bash
+MAVROS_FCU_URL=/dev/ttyUSB0:921600 ./container_run_rk3588.sh
+```
+
+部署稳定后可以按实际设备收紧权限。
+
+### 工程编译边界
+
+当前工程中的以下包直接使用 NVIDIA CUDA/TensorRT，不能仅靠换 Dockerfile 在
+RK3588 上编译或运行：
+
+- `yolo_trt_detector`
+- `yopo_planner`
+- `superpoint`
+- `local_sensing_node`、`sensor_simulator`
+- 仿真目录中的 `darknet_ros` CUDA 配置
+
+这些节点需要分别改成 RKNN C API/Lite2（推理）或 CPU/OpenCL 实现。其余 ROS
+包可先用 `catkin_tools` 跳过上述包进行板端编译；完整功能迁移还需要修改节点
+代码和把 ONNX 模型转换成 `target_platform=rk3588` 的 `.rknn` 模型。模型转换
+通常放在开发机完成，板端只安装 RKNN Runtime。
+
 ## nvidia jetson平台
 
 1. 构建 Jetson 镜像
@@ -221,3 +325,7 @@ rosbag play your_dataset.bag
 ```
 
 ⚠️ 注意第一次运行前端superpoint_frontend.launch会卡住，是正常现象，内部在进行跨平台的.onnx文件构建，等待3~4分钟即可正常运行，下一次也可正常启动。
+
+### gazebo仿真镜像
+
+在fastdrone_xi35:pc镜像存在的基础下，在Dockerfile文件夹下 make pc_sim
