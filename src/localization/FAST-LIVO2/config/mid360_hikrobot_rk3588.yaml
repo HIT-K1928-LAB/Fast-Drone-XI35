@@ -43,6 +43,15 @@ vio:
   inverse_composition_en: false
   exposure_estimate_en: true
   inv_expo_cov: 0.1
+  # Keep the online visual estimator bounded on the 16 GB RK3588. A Feature
+  # retains its complete reference image, so limiting only observations per
+  # point is not sufficient to bound memory.
+  visual_map_max_frame_age: 200
+  visual_map_max_points: 20000
+  visual_map_max_distance: 30.0
+  visual_map_prune_interval: 10
+  visual_point_max_observations: 15
+
 imu:
   imu_en: true
   imu_int_frame: 50

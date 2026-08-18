@@ -114,6 +114,11 @@ public:
   int lidar_en = 1;
   bool is_first_frame = false;
   int grid_size, patch_size, grid_n_width, grid_n_height, patch_pyrimid_level;
+  int visual_map_max_frame_age = 0;
+  int visual_map_max_points = 0;
+  int visual_map_prune_interval = 10;
+  int visual_point_max_observations = 30;
+  double visual_map_max_distance = 0.0;
   double outlier_threshold;
   double plot_time;
   int frame_cnt;

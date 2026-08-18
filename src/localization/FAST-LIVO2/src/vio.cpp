@@ -12,6 +12,9 @@ which is included as part of this source code package.
 
 #include "vio.h"
 
+#include <algorithm>
+#include <unordered_set>
+
 VIOManager::VIOManager()
 {
   // downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
@@ -174,6 +177,176 @@ void VIOManager::resetGrid()
   append_voxel_points.resize(length);
 
   total_points = 0;
+}
+
+void VIOManager::pruneVisualMap()
+{
+  const bool map_bound_enabled = visual_map_max_frame_age > 0 || visual_map_max_points > 0 || visual_map_max_distance > 0.0;
+  if (!map_bound_enabled || visual_map_prune_interval <= 0 || new_frame_ == nullptr ||
+      new_frame_->id_ % visual_map_prune_interval != 0)
+  {
+    return;
+  }
+
+  // These containers only borrow pointers from feat_map. They must be cleared
+  // at the frame boundary before any owning map entry is destroyed.
+  visual_submap->reset();
+  sub_feat_map.clear();
+  total_points = 0;
+
+  for (auto &entry : warp_map) delete entry.second;
+  warp_map.clear();
+
+  const size_t voxels_before = feat_map.size();
+  size_t points_before = 0;
+  size_t observations_before = 0;
+  size_t removed_by_age = 0;
+  size_t removed_by_distance = 0;
+  const int min_frame_id = visual_map_max_frame_age > 0
+                               ? std::max(0, new_frame_->id_ - visual_map_max_frame_age + 1)
+                               : 0;
+  const double max_distance_sq = visual_map_max_distance * visual_map_max_distance;
+  const V3D current_position = new_frame_->pos();
+
+  for (auto map_it = feat_map.begin(); map_it != feat_map.end();)
+  {
+    VOXEL_POINTS *voxel = map_it->second;
+    auto &points = voxel->voxel_points;
+    points_before += points.size();
+
+    for (auto point_it = points.begin(); point_it != points.end();)
+    {
+      VisualPoint *point = *point_it;
+      if (point == nullptr)
+      {
+        point_it = points.erase(point_it);
+        continue;
+      }
+
+      observations_before += point->obs_.size();
+      if (visual_map_max_frame_age > 0)
+      {
+        std::vector<Feature *> expired_observations;
+        for (Feature *feature : point->obs_)
+        {
+          if (feature->id_ < min_frame_id) expired_observations.push_back(feature);
+        }
+        for (Feature *feature : expired_observations)
+        {
+          point->deleteFeatureRef(feature);
+          ++removed_by_age;
+        }
+      }
+
+      while (visual_point_max_observations > 0 &&
+             point->obs_.size() > static_cast<size_t>(visual_point_max_observations))
+      {
+        point->deleteFeatureRef(point->obs_.back());
+      }
+
+      const bool outside_local_map = visual_map_max_distance > 0.0 &&
+                                     (point->pos_ - current_position).squaredNorm() > max_distance_sq;
+      if (point->obs_.empty() || outside_local_map)
+      {
+        if (outside_local_map) ++removed_by_distance;
+        delete point;
+        point_it = points.erase(point_it);
+      }
+      else
+      {
+        ++point_it;
+      }
+    }
+
+    voxel->count = static_cast<int>(points.size());
+    if (points.empty())
+    {
+      delete voxel;
+      map_it = feat_map.erase(map_it);
+    }
+    else
+    {
+      ++map_it;
+    }
+  }
+
+  size_t point_count = 0;
+  for (const auto &entry : feat_map) point_count += entry.second->voxel_points.size();
+
+  size_t removed_by_limit = 0;
+  if (visual_map_max_points > 0 && point_count > static_cast<size_t>(visual_map_max_points))
+  {
+    struct PointDistance
+    {
+      double squared_distance;
+      VisualPoint *point;
+    };
+
+    std::vector<PointDistance> candidates;
+    candidates.reserve(point_count);
+    for (const auto &entry : feat_map)
+    {
+      for (VisualPoint *point : entry.second->voxel_points)
+      {
+        candidates.push_back({(point->pos_ - current_position).squaredNorm(), point});
+      }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const PointDistance &lhs, const PointDistance &rhs) {
+      return lhs.squared_distance > rhs.squared_distance;
+    });
+
+    removed_by_limit = point_count - static_cast<size_t>(visual_map_max_points);
+    std::unordered_set<VisualPoint *> points_to_remove;
+    points_to_remove.reserve(removed_by_limit);
+    for (size_t i = 0; i < removed_by_limit; ++i) points_to_remove.insert(candidates[i].point);
+
+    for (auto map_it = feat_map.begin(); map_it != feat_map.end();)
+    {
+      VOXEL_POINTS *voxel = map_it->second;
+      auto &points = voxel->voxel_points;
+      for (auto point_it = points.begin(); point_it != points.end();)
+      {
+        if (points_to_remove.count(*point_it) != 0)
+        {
+          delete *point_it;
+          point_it = points.erase(point_it);
+        }
+        else
+        {
+          ++point_it;
+        }
+      }
+
+      voxel->count = static_cast<int>(points.size());
+      if (points.empty())
+      {
+        delete voxel;
+        map_it = feat_map.erase(map_it);
+      }
+      else
+      {
+        ++map_it;
+      }
+    }
+    point_count -= removed_by_limit;
+  }
+
+  size_t observation_count = 0;
+  std::unordered_set<int> reference_frame_ids;
+  for (const auto &entry : feat_map)
+  {
+    for (const VisualPoint *point : entry.second->voxel_points)
+    {
+      observation_count += point->obs_.size();
+      for (const Feature *feature : point->obs_) reference_frame_ids.insert(feature->id_);
+    }
+  }
+
+  printf("[ VIO ] Visual map prune: voxels %zu -> %zu, points %zu -> %zu, "
+         "observations %zu -> %zu, reference frames %zu, removed(age/dist/limit) %zu/%zu/%zu\n",
+         voxels_before, feat_map.size(), points_before, point_count, observations_before,
+         observation_count, reference_frame_ids.size(), removed_by_age, removed_by_distance,
+         removed_by_limit);
 }
 
 // void VIOManager::resetRvizDisplay()
@@ -864,6 +1037,12 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
       pointWithVar pt_var = append_voxel_points[i];
       V3D pt = pt_var.point_w;
 
+      if (visual_map_max_distance > 0.0 &&
+          (pt - new_frame_->pos()).squaredNorm() > visual_map_max_distance * visual_map_max_distance)
+      {
+        continue;
+      }
+
       V3D norm_vec(new_frame_->T_f_w_.rotation_matrix() * pt_var.normal);
       V3D dir(new_frame_->T_f_w_ * pt);
       dir.normalize();
@@ -924,11 +1103,9 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
     V2D pc(new_frame_->w2c(pt->pos_));
     bool add_flag = false;
     
-    float *patch_temp = new float[patch_size_total];
-    getImagePatch(img, pc, patch_temp, 0);
     // TODO: condition: distance and view_angle
     // Step 1: time
-    Feature *last_feature = pt->obs_.back();
+    Feature *last_feature = pt->obs_.front();
     // if(new_frame_->id_ >= last_feature->id_ + 10) add_flag = true; // 10
 
     // Step 2: delta_pose
@@ -943,16 +1120,19 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
     double pixel_dist = (pc - last_px).norm();
     if (pixel_dist > 40) add_flag = true;
 
-    // Maintain the size of 3D point observation features.
-    if (pt->obs_.size() >= 30)
-    {
-      Feature *ref_ftr;
-      pt->findMinScoreFeature(new_frame_->pos(), ref_ftr);
-      pt->deleteFeatureRef(ref_ftr);
-      // cout<<"pt->obs_.size() exceed 20 !!!!!!"<<endl;
-    }
     if (add_flag)
     {
+      // Make room only when a replacement observation is actually added.
+      while (visual_point_max_observations > 0 &&
+             pt->obs_.size() >= static_cast<size_t>(visual_point_max_observations))
+      {
+        Feature *ref_ftr;
+        pt->findMinScoreFeature(new_frame_->pos(), ref_ftr);
+        pt->deleteFeatureRef(ref_ftr);
+      }
+
+      float *patch_temp = new float[patch_size_total];
+      getImagePatch(img, pc, patch_temp, 0);
       update_num += 1;
       update_flag[i] = 1;
       Vector3d f = cam->cam2world(pc);
@@ -1800,6 +1980,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   updateFrameState(*state);
   
   resetGrid();
+  pruneVisualMap();
 
   double t1 = omp_get_wtime();
 

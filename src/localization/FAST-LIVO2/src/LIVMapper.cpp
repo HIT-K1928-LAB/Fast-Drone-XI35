@@ -70,6 +70,11 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<int>("vio/patch_pyrimid_level", patch_pyrimid_level, 3);
   nh.param<int>("vio/patch_size", patch_size, 8);
   nh.param<double>("vio/outlier_threshold", outlier_threshold, 1000);
+  nh.param<int>("vio/visual_map_max_frame_age", visual_map_max_frame_age, 0);
+  nh.param<int>("vio/visual_map_max_points", visual_map_max_points, 0);
+  nh.param<double>("vio/visual_map_max_distance", visual_map_max_distance, 0.0);
+  nh.param<int>("vio/visual_map_prune_interval", visual_map_prune_interval, 10);
+  nh.param<int>("vio/visual_point_max_observations", visual_point_max_observations, 30);
 
   nh.param<double>("time_offset/exposure_time_init", exposure_time_init, 0.0);
   nh.param<double>("time_offset/img_time_offset", img_time_offset, 0.0);
@@ -146,6 +151,11 @@ void LIVMapper::initializeComponents()
   vio_manager->patch_pyrimid_level = patch_pyrimid_level;
   vio_manager->exposure_estimate_en = exposure_estimate_en;
   vio_manager->colmap_output_en = colmap_output_en;
+  vio_manager->visual_map_max_frame_age = visual_map_max_frame_age;
+  vio_manager->visual_map_max_points = visual_map_max_points;
+  vio_manager->visual_map_max_distance = visual_map_max_distance;
+  vio_manager->visual_map_prune_interval = visual_map_prune_interval;
+  vio_manager->visual_point_max_observations = visual_point_max_observations;
   vio_manager->initializeVIO();
 
   p_imu->set_extrinsic(extT, extR);
