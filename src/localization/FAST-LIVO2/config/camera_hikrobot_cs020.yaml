@@ -1,0 +1,18 @@
+# Hikrobot MV-CS020-10UC (DA1135025)
+# Kalibr source: camchain-hik_camera_calib.yaml
+# Calibration image/topic resolution: 1624x1240
+cam_model: Pinhole
+cam_width: 1624
+cam_height: 1240
+scale: 1.0
+
+cam_fx: 1383.772982212317
+cam_fy: 1384.4040601227505
+cam_cx: 835.2546114163334
+cam_cy: 655.2825943177556
+
+# Kalibr radtan order: k1, k2, p1, p2
+cam_d0: -0.07532117954113744
+cam_d1: 0.1184918297071926
+cam_d2: 0.0023001774760925773
+cam_d3: -0.000955569619346389

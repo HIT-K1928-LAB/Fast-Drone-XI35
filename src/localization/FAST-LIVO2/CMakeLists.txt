@@ -124,6 +124,11 @@ catkin_package(
   DEPENDS EIGEN3 PCL OpenCV Sophus
 )
 
+catkin_install_python(PROGRAMS
+  scripts/hikrobot_mvs_node.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
 # Include directories for dependencies
 include_directories(
   ${catkin_INCLUDE_DIRS}
