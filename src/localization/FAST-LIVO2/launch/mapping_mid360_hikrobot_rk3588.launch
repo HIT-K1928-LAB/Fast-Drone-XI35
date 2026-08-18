@@ -1,0 +1,14 @@
+<launch>
+  <arg name="rviz" default="false"/>
+
+  <rosparam command="load" file="$(find fast_livo)/config/mid360_hikrobot_rk3588.yaml"/>
+
+  <node pkg="fast_livo" type="fastlivo_mapping" name="laserMapping" output="screen">
+    <rosparam file="$(find fast_livo)/config/camera_hikrobot_cs020.yaml"/>
+  </node>
+
+  <group if="$(arg rviz)">
+    <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz"
+          args="-d $(find fast_livo)/rviz_cfg/fast_livo2.rviz"/>
+  </group>
+</launch>
