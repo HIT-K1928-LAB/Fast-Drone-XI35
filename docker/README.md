@@ -88,6 +88,108 @@ MAVROS_FCU_URL=/dev/ttyUSB0:921600 ./container_run_rk3588.sh
 
 部署稳定后可以按实际设备收紧权限。
 
+### MID360 与海康 USB3 工业相机
+
+已在 `rk3588-01` 上验证以下实机连接：MID360 接到专用 `eth0`，海康
+`MV-CS020-10UC`（序列号 `DA1135025`）通过 USB3 Vision 接入。容器启动脚本已
+使用 `--network host` 和 `/dev` 透传，因此不需要额外的 Docker 网络或 USB 映射。
+
+首次在宿主机配置 MID360 专用网口。此操作只修改 `eth0`，不会影响 SSH 使用的
+`rename5`：
+
+```bash
+sudo nmcli connection modify "Wired connection 1" \
+  connection.interface-name eth0 ipv4.method manual \
+  ipv4.addresses 192.168.1.5/24 ipv4.gateway "" ipv6.method disabled
+sudo nmcli connection up "Wired connection 1"
+```
+
+本机 MID360 的实际地址为 `192.168.1.103`，数据端口为 `56300`（点云）和
+`56400`（IMU）。该地址已写入
+`src/localization/FAST-LIVO2/config/mid360_rk3588.json`；若日后在 Livox Viewer
+中改了雷达 IP，必须同步修改该文件里的 `lidar_configs[0].ip`。重新构建或首次
+使用工程时执行：
+
+```bash
+cd /root/Fast-Drone-XI35
+./tools/make.sh fastlivo -c
+source devel/setup.bash
+```
+
+`fastlivo` 组会先构建 `livox_ros_driver2`，并自动为其生成 ROS1 的包清单；不应
+从当前工程路径直接执行上游的 `livox_ros_driver2/build.sh`，该脚本假定驱动直接
+位于工作区 `src/` 下。
+
+启动并验收 MID360：
+
+```bash
+# 终端 1：MID360；应出现 /livox/lidar 和 /livox/imu
+roslaunch fast_livo mid360_rk3588.launch
+
+# 终端 2：确认 MID360 数据持续发布
+rostopic hz /livox/lidar
+rostopic hz /livox/imu
+```
+
+镜像内置 `Livox-SDK2`、`livox_ros_driver2` 所需依赖，以及 ARM64 可用的
+Aravis/GStreamer 诊断工具。已验证相机能以标准 USB3 Vision/GenICam 协议被枚举，
+控制面可读取 `1624x1240`、`BayerRG8`、连续触发等参数：
+
+```bash
+arv-tool-0.6 -n Hikrobot-DA1135025 control \
+  DeviceVendorName DeviceModelName DeviceSerialNumber Width Height PixelFormat
+```
+
+本板的通用 Aravis 0.6 数据流测试会在开始取流后报 `Internal data stream error`，
+故它仅作为枚举/控制诊断工具，不能替代正式相机驱动。已用海康 MVS 5.0.2 ARM64
+官方 Python 示例验证 `DA1135025` 能连续抓取 1624×1240 图像帧。MVS 安装在 RK3588
+宿主机的 `/opt/MVS`，运行脚本会把它以只读方式挂载到容器；MVS 安装包和 `/opt/MVS`
+均不提交到仓库。
+
+启动 ROS 图像采集（默认使用本机相机序列号）：
+
+```bash
+roslaunch fast_livo hikrobot_cs020_rk3588.launch
+# 另一个终端：应持续显示频率并收到 bayer_rggb8 原始图像
+rostopic hz /hikrobot_camera/image_raw
+rostopic echo -n 1 /hikrobot_camera/image_raw/header
+```
+
+话题为 `/hikrobot_camera/image_raw`，编码为 `bayer_rggb8`，保留传感器原始数据。
+更换相机时可指定序列号，例如
+`roslaunch fast_livo hikrobot_cs020_rk3588.launch device_serial:=<序列号>`。如需彩色
+图像，可用 `image_proc` 的 debayer 节点订阅该原始话题。运行时只保留一个应用独占相机。
+
+相机默认使用固定曝光 `20000 us`、增益 `6 dB`，适合作为 10 Hz 室内低照度的起点。
+若画面仍暗，优先逐步提高曝光（例如 `25000`、`30000 us`），再提高增益；增益过高会
+明显增加噪声。示例：
+
+```bash
+roslaunch fast_livo hikrobot_cs020_rk3588.launch exposure_time_us:=30000 gain_db:=6
+```
+
+在 10 Hz 下不要把曝光长时间设得高于约 `100000 us`，否则会降低实际帧率或造成运动模糊。
+将 `exposure_time_us:=0 gain_db:=-1` 可保留相机内部已有的手动配置。
+可用 `exposure_auto:=Continuous` 开启连续自动曝光，或用 `Once` 仅自动调一次；完成
+现场亮度调试后，建议读出合适的曝光值并恢复 `exposure_auto:=Off` 的固定曝光。
+该相机固件未暴露自动曝光目标灰度和上下限节点；若硬件自动曝光对场景变化不敏感，可用
+节点侧的可预测模式：`exposure_auto:=Software`。它每 0.5 秒根据原始 Bayer 图像的平均
+亮度调节曝光，默认目标灰度为 100、范围为 1000--90000 us。
+相机节点每 0.5 秒发布当前 SDK 实际使用的数值（自动曝光时会变化）：
+
+```bash
+rostopic echo /hikrobot_camera/exposure_time_us
+rostopic echo /hikrobot_camera/gain_db
+```
+
+当前海康启动文件还会显式设置标定用图像几何：`1624x1240`、`OffsetX=0`、
+`OffsetY=0`、`Binning=1x1`，节点不进行软件裁剪，并将采集帧率设为 `10 Hz`。镜头
+焦距和对焦位置是机械状态，必须在完成标定后保持不动。
+
+`mid360_hikrobot_rk3588.yaml` 和 `camera_hikrobot_cs020.yaml` 已写入当前这套
+MID360--海康相机组合的实测外参和内参。更换相机、雷达、镜头或改变安装位置后，必须
+重新标定并更新对应参数，不能直接沿用当前数值。
+
 ### 工程编译边界
 
 当前工程中的以下包直接使用 NVIDIA CUDA/TensorRT，不能仅靠换 Dockerfile 在
