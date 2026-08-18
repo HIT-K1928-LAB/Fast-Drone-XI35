@@ -22,6 +22,8 @@ ARG SOPHUS_REPOSITORY=https://github.com/strasdat/Sophus.git
 ARG SOPHUS_COMMIT=a621ff2e56c56c839a6c40418d42c3c254424b5c
 ARG RKNN_TOOLKIT_VERSION=2.3.2
 ARG RKNN_TOOLKIT_REPOSITORY=https://github.com/airockchip/rknn-toolkit2.git
+ARG LIVOX_SDK2_REPOSITORY=https://github.com/Livox-SDK/Livox-SDK2.git
+ARG LIVOX_SDK2_COMMIT=f5d9375f84efe2b15bc0a052d3e18482ed13adf4
 ARG WGET_RETRY_OPTS="--quiet --tries=5 --waitretry=5 --timeout=30 --read-timeout=30 --retry-connrefused"
 ARG PIP_RETRY_OPTS="--retries 5 --timeout 60 --no-cache-dir"
 
@@ -51,6 +53,7 @@ RUN sed -i \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         apt-utils \
+        aravis-tools \
         autoconf \
         automake \
         build-essential \
@@ -131,6 +134,23 @@ RUN apt-get update && \
     ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \
     echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc
+
+# Livox ROS Driver2 links this SDK from /usr/local/lib.  The driver source is
+# mounted with the project at runtime, while the SDK is part of the image.
+RUN for attempt in 1 2 3 4 5; do \
+        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout \
+            ${LIVOX_SDK2_REPOSITORY} /tmp/Livox-SDK2 && break; \
+        rm -rf /tmp/Livox-SDK2; \
+        sleep 5; \
+    done && \
+    test -d /tmp/Livox-SDK2/.git && \
+    git -C /tmp/Livox-SDK2 checkout --detach ${LIVOX_SDK2_COMMIT} && \
+    cmake -S /tmp/Livox-SDK2 -B /tmp/Livox-SDK2/build \
+        -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/Livox-SDK2/build --parallel ${USE_PROC} && \
+    cmake --install /tmp/Livox-SDK2/build && \
+    ldconfig && \
+    rm -rf /tmp/Livox-SDK2
 
 # FAST-LIVO2 uses this pinned legacy Sophus API.
 RUN for attempt in 1 2 3 4 5; do \

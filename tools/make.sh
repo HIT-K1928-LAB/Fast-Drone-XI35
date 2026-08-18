@@ -11,6 +11,7 @@ CATKIN_LOG_SPACE="build/logs"
 # RK3588 Fast-LIVO build set. Add or remove ROS package names here as needed.
 # catkin_tools will also build any required package dependencies automatically.
 RK3588_FASTLIVO_PACKAGES=(
+  livox_ros_driver2
   vikit_common
   vikit_ros
   fast_livo
@@ -214,6 +215,10 @@ run_catkin_build() {
   fi
 
   cmake_args+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
+  # livox_ros_driver2 selects its ROS 1 CMake branch with this variable.
+  # The workspace is ROS Noetic, so keeping it explicit also makes a fresh
+  # RK3588 container build independent of any previous catkin configuration.
+  cmake_args+=("-DROS_EDITION=ROS1")
 
   if [[ "${EXPORT_COMPILE_COMMANDS}" == true ]]; then
     cmake_args+=("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
@@ -282,6 +287,17 @@ EOF
 
 build_fastlivo() {
   local package
+
+  # Livox ROS Driver2 keeps separate ROS1/ROS2 manifests.  It normally
+  # generates package.xml through its standalone build.sh, but that script
+  # assumes the driver is directly below a workspace's src directory.  Here
+  # the driver is intentionally nested in src/drivers, so prepare its ROS1
+  # manifest for catkin_tools instead.
+  local livox_driver_dir="${SRC_DIR}/drivers/livox_ros_driver2"
+  if [[ -d "${livox_driver_dir}" && ! -f "${livox_driver_dir}/package.xml" \
+        && -f "${livox_driver_dir}/package_ROS1.xml" ]]; then
+    cp "${livox_driver_dir}/package_ROS1.xml" "${livox_driver_dir}/package.xml"
+  fi
 
   for package in "${RK3588_FASTLIVO_PACKAGES[@]}"; do
     if ! package_exists "${package}"; then

@@ -9,6 +9,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_DIR=${PROJECT_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}
 DISPLAY_VALUE=${DISPLAY:-:0}
 XAUTH_FILE=${XAUTHORITY:-${HOME}/.Xauthority}
+MVS_DIR=${MVS_DIR:-/opt/MVS}
 
 if docker ps -a --format '{{.Names}}' | grep -qw "${CONTAINER_NAME}"; then
     echo "Container '${CONTAINER_NAME}' already exists."
@@ -70,6 +71,11 @@ fi
 
 if [ -d /run/udev ]; then
     DOCKER_ARGS+=(-v /run/udev:/run/udev:ro)
+fi
+
+# MVS is proprietary and is installed on the RK3588 host, not baked into the image.
+if [ -d "${MVS_DIR}" ]; then
+    DOCKER_ARGS+=(-v "${MVS_DIR}:/opt/MVS:ro")
 fi
 
 docker run "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" /bin/bash
