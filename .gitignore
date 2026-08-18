@@ -13,6 +13,9 @@ logs
 __pycache__/
 *.py[cod]
 
+# Hikrobot MVS SDK runtime logs.
+MvSdkLog/
+
 # Local TensorRT archives must be downloaded manually and are too large for Git.
 Docker/TensorRT-*.tar.gz
 Docker/TensorRT-*.tar.gz:Zone.Identifier
