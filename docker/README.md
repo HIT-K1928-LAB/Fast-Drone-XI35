@@ -146,6 +146,24 @@ arv-tool-0.6 -n Hikrobot-DA1135025 control \
 宿主机的 `/opt/MVS`，运行脚本会把它以只读方式挂载到容器；MVS 安装包和 `/opt/MVS`
 均不提交到仓库。
 
+海康 USB3 相机需要较大的 usbfs URB 内存上限。RK3588 宿主机（不是容器）使用以下
+服务将其持久设为 `2000 MB`。首次安装时立即生效，以后开机时会在 Docker 启动前
+生效：
+
+```bash
+cd /home/rk3588/Fast-Drone-XI35
+sudo install -m 0644 \
+  docker/systemd/fastdrone-rk3588-usbfs-memory.service \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fastdrone-rk3588-usbfs-memory.service
+systemctl show fastdrone-rk3588-usbfs-memory.service \
+  -p LoadState -p ActiveState -p FragmentPath
+cat /sys/module/usbcore/parameters/usbfs_memory_mb
+```
+
+最后一条命令应输出 `2000`。该数值是可分配上限，不会在开机时立即预留 2 GB。
+
 启动 ROS 图像采集（默认使用本机相机序列号）：
 
 ```bash
@@ -160,7 +178,7 @@ rostopic echo -n 1 /hikrobot_camera/image_raw/header
 `roslaunch fast_livo hikrobot_cs020_rk3588.launch device_serial:=<序列号>`。如需彩色
 图像，可用 `image_proc` 的 debayer 节点订阅该原始话题。运行时只保留一个应用独占相机。
 
-相机默认使用固定曝光 `20000 us`、增益 `6 dB`，适合作为 10 Hz 室内低照度的起点。
+相机默认使用固定曝光 `20000 us`、增益 `6 dB`，适合作为 5 Hz 室内低照度的起点。
 若画面仍暗，优先逐步提高曝光（例如 `25000`、`30000 us`），再提高增益；增益过高会
 明显增加噪声。示例：
 
@@ -168,14 +186,16 @@ rostopic echo -n 1 /hikrobot_camera/image_raw/header
 roslaunch fast_livo hikrobot_cs020_rk3588.launch exposure_time_us:=30000 gain_db:=6
 ```
 
-在 10 Hz 下不要把曝光长时间设得高于约 `100000 us`，否则会降低实际帧率或造成运动模糊。
+在 5 Hz 下不要把曝光长时间设得高于约 `200000 us`，否则会降低实际帧率；动态建图时
+应明显低于该上限，以减少运动模糊。
 将 `exposure_time_us:=0 gain_db:=-1` 可保留相机内部已有的手动配置。
 可用 `exposure_auto:=Continuous` 开启连续自动曝光，或用 `Once` 仅自动调一次；完成
 现场亮度调试后，建议读出合适的曝光值并恢复 `exposure_auto:=Off` 的固定曝光。
 该相机固件未暴露自动曝光目标灰度和上下限节点；若硬件自动曝光对场景变化不敏感，可用
 节点侧的可预测模式：`exposure_auto:=Software`。它每 0.5 秒根据原始 Bayer 图像的平均
 亮度调节曝光，默认目标灰度为 100、范围为 1000--90000 us。
-相机节点每 0.5 秒发布当前 SDK 实际使用的数值（自动曝光时会变化）：
+有订阅者时，相机节点每 0.5 秒读取并发布当前 SDK 实际使用的数值（自动曝光时会
+变化）；无人订阅时不访问这些控制寄存器，以减少 USB 控制传输对图像流的干扰：
 
 ```bash
 rostopic echo /hikrobot_camera/exposure_time_us
@@ -183,8 +203,34 @@ rostopic echo /hikrobot_camera/gain_db
 ```
 
 当前海康启动文件还会显式设置标定用图像几何：`1624x1240`、`OffsetX=0`、
-`OffsetY=0`、`Binning=1x1`，节点不进行软件裁剪，并将采集帧率设为 `10 Hz`。镜头
-焦距和对焦位置是机械状态，必须在完成标定后保持不动。
+`OffsetY=0`、`Binning=1x1`，节点不进行软件裁剪，将 SDK 图像缓存设为 5，并将
+采集帧率设为 `5 Hz`。发生 USB 数据流恢复、设备帧号回退时，节点会先释放当前
+buffer，再停止采集、重建缓存并重新写入和回读相机配置。镜头焦距和对焦位置是
+机械状态，必须在完成标定后保持不动。恢复次数达到
+`recovery_warning_threshold`（默认 60 秒内 10 次）时会持续输出链路不稳定告警，
+但不会主动退出相机节点；如果 SDK 的停止、配置或重新启动操作本身失败，节点仍会
+退出并保留明确的错误码，避免在未知采集状态下继续发布数据。启动文件默认会在 3 秒后
+重新拉起异常退出的相机进程；调试时可用 `respawn:=false` 关闭自动重启。
+
+ROC-RK3588S-PC 的 USB-A 口使用 `fcd00000` xHCI/USB3 PHY。满载实测中，usbmon 在
+相机图像流端点 `EP3 IN` 捕获到 `-EPROTO`（USB 协议/响应错误）和 `-EPIPE`
+（端点 stall），它们发生在 MVS `Transfer Stall` 之前；因此这是 USB 事务层故障，
+不是 ROS 话题、图像频率或 FAST-LIVO2 队列产生的错误。FAST-LIVO2 会显著提高该错误
+的发生概率，但单独持续订阅图像不会。驱动在复制完图像后会立即归还 MVS buffer，
+并允许通过 `usb_transfer_size_bytes`、`usb_transfer_ways` 调节 U3V 传输；本机测试
+`2 ways` 或 `2 MiB` 传输块均未根治，所以默认保留 SDK 常用的 `1 MiB / 8 ways`。
+
+当前相机声明最大取电 `800 mA`，接近 USB3 Type-A 的标准供电上限。若仍频繁出现
+`Transfer Stall`，先使用带独立供电的 USB3 Hub 做供电/重定时 A/B；其次可通过
+USB-C OTG 主机口转接，测试另一组控制器/PHY。若有源 Hub 后稳定，优先检查开发板
+USB VBUS 和整机电源余量；若 USB-C 稳定而 USB-A 仍失败，优先检查 USB-A 口及其
+`fcd00000` PHY/BSP；两端口均失败但同一相机在 x86 主机稳定时，再升级或向板卡厂商
+反馈 RK3588S 的 xHCI/PHY BSP。
+
+RK3588 的 FAST-LIVO2 配置还在接收端启用了基于图像时间戳的 `5 Hz` 软件保护；
+它在图像颜色转换前丢弃超频帧，并将 ROS 订阅队列及解码后的图像队列限制为 3 帧。
+相关参数位于 `mid360_hikrobot_rk3588.yaml` 的 `image_input` 段，可按数据源调整；
+将 `max_rate_hz` 或 `buffer_max_frames` 设为 `0` 可分别关闭对应保护。
 
 `mid360_hikrobot_rk3588.yaml` 和 `camera_hikrobot_cs020.yaml` 已写入当前这套
 MID360--海康相机组合的实测外参和内参。更换相机、雷达、镜头或改变安装位置后，必须
