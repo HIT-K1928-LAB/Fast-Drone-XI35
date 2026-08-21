@@ -6,6 +6,15 @@ common:
   lidar_en: true
   ros_driver_bug_fix: false
 
+# Protect the 16 GB RK3588 from a camera or SDK recovery that publishes faster
+# than the estimator can consume. The phase-based limiter tolerates normal
+# 5 Hz timestamp jitter, and both ROS and decoded-image queues stay bounded.
+image_input:
+  max_rate_hz: 5.0
+  rate_tolerance_ratio: 0.20
+  subscriber_queue_size: 3
+  buffer_max_frames: 3
+
 extrin_calib:
   # MID360 built-in IMU to LiDAR; use the device-aligned frame convention.
   extrinsic_T: [0.0, 0.0, 0.0]

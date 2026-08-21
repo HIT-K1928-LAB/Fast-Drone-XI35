@@ -83,9 +83,14 @@ public:
   double filter_size_pcd = 0;
   double _first_lidar_time = 0.0;
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
+  double img_max_rate_hz = 0.0;
+  double img_rate_tolerance_ratio = 0.2;
+  double next_img_accept_time = -1.0;
 
   bool lidar_map_inited = false, pcd_save_en = false, img_save_en = false, pub_effect_point_en = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
   int img_save_interval = 1, pcd_save_interval = -1, pcd_save_type = 0;
+  int img_subscriber_queue_size = 200000;
+  int img_buffer_max_frames = 0;
   int pub_scan_num = 1;
 
   StatesGroup imu_propagate, latest_ekf_state;

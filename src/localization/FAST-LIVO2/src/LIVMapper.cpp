@@ -12,7 +12,9 @@ which is included as part of this source code package.
 
 #include "LIVMapper.h"
 
+#include <algorithm>
 #include <filesystem>
+#include <utility>
 
 LIVMapper::LIVMapper(ros::NodeHandle &nh)
     : extT(0, 0, 0),
@@ -57,6 +59,15 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<int>("common/img_en", img_en, 1);
   nh.param<int>("common/lidar_en", lidar_en, 1);
   nh.param<string>("common/img_topic", img_topic, "/left_camera/image");
+
+  nh.param<double>("image_input/max_rate_hz", img_max_rate_hz, 0.0);
+  nh.param<double>("image_input/rate_tolerance_ratio", img_rate_tolerance_ratio, 0.2);
+  nh.param<int>("image_input/subscriber_queue_size", img_subscriber_queue_size, 200000);
+  nh.param<int>("image_input/buffer_max_frames", img_buffer_max_frames, 0);
+  img_max_rate_hz = std::max(0.0, img_max_rate_hz);
+  img_rate_tolerance_ratio = std::max(0.0, std::min(0.49, img_rate_tolerance_ratio));
+  img_subscriber_queue_size = std::max(1, img_subscriber_queue_size);
+  img_buffer_max_frames = std::max(0, img_buffer_max_frames);
 
   nh.param<bool>("vio/normal_en", normal_en, true);
   nh.param<bool>("vio/inverse_composition_en", inverse_composition_en, false);
@@ -225,7 +236,7 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
             nh.subscribe(lid_topic, 200000, &LIVMapper::livox_pcl_cbk, this): 
             nh.subscribe(lid_topic, 200000, &LIVMapper::standard_pcl_cbk, this);
   sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this);
-  sub_img = nh.subscribe(img_topic, 200000, &LIVMapper::img_cbk, this);
+  sub_img = nh.subscribe(img_topic, img_subscriber_queue_size, &LIVMapper::img_cbk, this);
   
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
   pubNormal = nh.advertise<visualization_msgs::MarkerArray>("visualization_marker", 100);
@@ -859,12 +870,10 @@ cv::Mat LIVMapper::getImageFromMsg(const sensor_msgs::ImageConstPtr &img_msg)
 void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
 {
   if (!img_en) return;
-  sensor_msgs::Image::Ptr msg(new sensor_msgs::Image(*msg_in));
-  // if ((abs(msg->header.stamp.toSec() - last_timestamp_img) > 0.2 && last_timestamp_img > 0) || sync_jump_flag)
+  // if ((abs(msg_in->header.stamp.toSec() - last_timestamp_img) > 0.2 && last_timestamp_img > 0) || sync_jump_flag)
   // {
-  //   ROS_WARN("img jumps %.3f\n", msg->header.stamp.toSec() - last_timestamp_img);
+  //   ROS_WARN("img jumps %.3f\n", msg_in->header.stamp.toSec() - last_timestamp_img);
   //   sync_jump_flag = true;
-  //   msg->header.stamp = ros::Time().fromSec(last_timestamp_img + 0.1);
   // }
 
   // Hiliti2022 40Hz
@@ -873,10 +882,8 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
     static int frame_counter = 0;
     if (++frame_counter % 4 != 0) return;
   }
-  // double msg_header_time =  msg->header.stamp.toSec();
-  double msg_header_time = msg->header.stamp.toSec() + img_time_offset;
+  const double msg_header_time = msg_in->header.stamp.toSec() + img_time_offset;
   if (abs(msg_header_time - last_timestamp_img) < 0.001) return;
-  ROS_INFO("Get image, its header time: %.6f", msg_header_time);
   if (last_timestamp_lidar < 0) return;
 
   if (msg_header_time < last_timestamp_img)
@@ -885,29 +892,59 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
     return;
   }
 
-  mtx_buffer.lock();
-
-  double img_time_correct = msg_header_time; // last_timestamp_lidar + 0.105;
-
-  if (img_time_correct - last_timestamp_img < 0.02)
+  const double img_time_correct = msg_header_time; // last_timestamp_lidar + 0.105;
+  if (img_max_rate_hz > 0.0)
   {
-    ROS_WARN("Image need Jumps: %.6f", img_time_correct);
-    mtx_buffer.unlock();
-    sig_buffer.notify_all();
+    const double period = 1.0 / img_max_rate_hz;
+    const double tolerance = period * img_rate_tolerance_ratio;
+    if (next_img_accept_time < 0.0)
+    {
+      next_img_accept_time = img_time_correct + period;
+    }
+    else
+    {
+      if (img_time_correct + tolerance < next_img_accept_time)
+      {
+        ROS_WARN_THROTTLE(5.0, "Image input rate exceeds %.2f Hz; dropping frames before conversion.", img_max_rate_hz);
+        return;
+      }
+      next_img_accept_time += period;
+      if (next_img_accept_time <= img_time_correct)
+        next_img_accept_time = img_time_correct + period;
+    }
+  }
+  else if (img_time_correct - last_timestamp_img < 0.02)
+  {
+    ROS_WARN_THROTTLE(5.0, "Image input exceeds the legacy 50 Hz guard; dropping frames.");
     return;
   }
 
-  cv::Mat img_cur = getImageFromMsg(msg);
-  img_buffer.push_back(img_cur);
-  img_time_buffer.push_back(img_time_correct);
+  cv::Mat img_cur = getImageFromMsg(msg_in);
 
-  // ROS_INFO("Correct Image time: %.6f", img_time_correct);
+  {
+    std::lock_guard<std::mutex> lock(mtx_buffer);
+    img_buffer.emplace_back(std::move(img_cur));
+    img_time_buffer.emplace_back(img_time_correct);
+    while (img_buffer_max_frames > 0 &&
+           img_buffer.size() > static_cast<size_t>(img_buffer_max_frames))
+    {
+      // Between the LIO and VIO halves of an update, index 0 is in flight and
+      // must not be replaced. Drop the oldest waiting image (index 1) instead.
+      const size_t drop_index =
+          (LidarMeasures.lio_vio_flg == LIO && img_buffer.size() > 1) ? 1 : 0;
+      img_buffer.erase(img_buffer.begin() + drop_index);
+      img_time_buffer.erase(img_time_buffer.begin() + drop_index);
+      ROS_WARN_THROTTLE(5.0, "Image processing is behind; bounding the input buffer at %d frames.",
+                        img_buffer_max_frames);
+    }
 
-  last_timestamp_img = img_time_correct;
-  // cv::imshow("img", img);
-  // cv::waitKey(1);
-  // cout<<"last_timestamp_img:::"<<last_timestamp_img<<endl;
-  mtx_buffer.unlock();
+    // ROS_INFO("Correct Image time: %.6f", img_time_correct);
+
+    last_timestamp_img = img_time_correct;
+    // cv::imshow("img", img);
+    // cv::waitKey(1);
+    // cout<<"last_timestamp_img:::"<<last_timestamp_img<<endl;
+  }
   sig_buffer.notify_all();
 }
 
