@@ -10,8 +10,18 @@
   <arg name="offset_y" default="0"/>
   <arg name="binning_x" default="1"/>
   <arg name="binning_y" default="1"/>
-  <arg name="frame_rate_hz" default="10.0"/>
-  <!-- A conservative low-light starting point for the current 10 Hz stream. -->
+  <arg name="frame_rate_hz" default="5.0"/>
+  <arg name="image_node_num" default="5"/>
+  <!-- Keep the SDK's usual 1 MiB / 8-way U3V transport; both remain tunable. -->
+  <arg name="usb_transfer_size_bytes" default="0"/>
+  <arg name="usb_transfer_ways" default="8"/>
+  <arg name="capture_failure_recovery_threshold" default="3"/>
+  <!-- High recovery rates are reported but never terminate the camera node. -->
+  <arg name="recovery_warning_threshold" default="10"/>
+  <arg name="recovery_window_s" default="60.0"/>
+  <arg name="respawn" default="true"/>
+  <arg name="respawn_delay" default="3.0"/>
+  <!-- A conservative low-light starting point for the current 5 Hz stream. -->
   <arg name="exposure_time_us" default="20000.0"/>
   <arg name="gain_db" default="6.0"/>
   <!-- Off, Once, Continuous (camera hardware), or Software (node fallback). -->
@@ -19,9 +29,11 @@
   <arg name="auto_exposure_target_gray" default="100.0"/>
   <arg name="auto_exposure_min_us" default="1000.0"/>
   <arg name="auto_exposure_max_us" default="90000.0"/>
-  <node pkg="fast_livo" type="hikrobot_mvs_node.py" name="hikrobot_mvs_camera" output="screen">
+  <node pkg="fast_livo" type="hikrobot_mvs_node.py" name="hikrobot_mvs_camera"
+        output="screen" respawn="$(arg respawn)" respawn_delay="$(arg respawn_delay)">
     <env name="MVCAM_SDK_PATH" value="/opt/MVS"/>
     <env name="MVCAM_COMMON_RUNENV" value="/opt/MVS/lib"/>
+    <env name="LD_LIBRARY_PATH" value="/opt/MVS/lib/aarch64:$(optenv LD_LIBRARY_PATH)"/>
     <param name="device_serial" value="$(arg device_serial)"/>
     <param name="frame_id" value="$(arg frame_id)"/>
     <param name="image_topic" value="$(arg image_topic)"/>
@@ -32,6 +44,12 @@
     <param name="binning_x" value="$(arg binning_x)"/>
     <param name="binning_y" value="$(arg binning_y)"/>
     <param name="frame_rate_hz" value="$(arg frame_rate_hz)"/>
+    <param name="image_node_num" value="$(arg image_node_num)"/>
+    <param name="usb_transfer_size_bytes" value="$(arg usb_transfer_size_bytes)"/>
+    <param name="usb_transfer_ways" value="$(arg usb_transfer_ways)"/>
+    <param name="capture_failure_recovery_threshold" value="$(arg capture_failure_recovery_threshold)"/>
+    <param name="recovery_warning_threshold" value="$(arg recovery_warning_threshold)"/>
+    <param name="recovery_window_s" value="$(arg recovery_window_s)"/>
     <param name="exposure_time_us" value="$(arg exposure_time_us)"/>
     <param name="gain_db" value="$(arg gain_db)"/>
     <param name="exposure_auto" value="$(arg exposure_auto)"/>

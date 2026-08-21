@@ -1,0 +1,13 @@
+[Unit]
+Description=Increase usbfs memory limit for RK3588 USB3 Vision cameras
+After=systemd-modules-load.service
+Before=docker.service
+ConditionPathExists=/sys/module/usbcore/parameters/usbfs_memory_mb
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 2000 > /sys/module/usbcore/parameters/usbfs_memory_mb && test "$(cat /sys/module/usbcore/parameters/usbfs_memory_mb)" = 2000'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
