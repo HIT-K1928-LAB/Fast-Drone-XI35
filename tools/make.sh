@@ -288,17 +288,6 @@ EOF
 build_fastlivo() {
   local package
 
-  # Livox ROS Driver2 keeps separate ROS1/ROS2 manifests.  It normally
-  # generates package.xml through its standalone build.sh, but that script
-  # assumes the driver is directly below a workspace's src directory.  Here
-  # the driver is intentionally nested in src/drivers, so prepare its ROS1
-  # manifest for catkin_tools instead.
-  local livox_driver_dir="${SRC_DIR}/drivers/livox_ros_driver2"
-  if [[ -d "${livox_driver_dir}" && ! -f "${livox_driver_dir}/package.xml" \
-        && -f "${livox_driver_dir}/package_ROS1.xml" ]]; then
-    cp "${livox_driver_dir}/package_ROS1.xml" "${livox_driver_dir}/package.xml"
-  fi
-
   for package in "${RK3588_FASTLIVO_PACKAGES[@]}"; do
     if ! package_exists "${package}"; then
       echo "Unknown Fast-LIVO package in RK3588_FASTLIVO_PACKAGES: ${package}" >&2

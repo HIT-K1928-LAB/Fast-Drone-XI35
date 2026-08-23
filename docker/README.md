@@ -116,9 +116,9 @@ cd /root/Fast-Drone-XI35
 source devel/setup.bash
 ```
 
-`fastlivo` 组会先构建 `livox_ros_driver2`，并自动为其生成 ROS1 的包清单；不应
-从当前工程路径直接执行上游的 `livox_ros_driver2/build.sh`，该脚本假定驱动直接
-位于工作区 `src/` 下。
+`livox_ros_driver2` 已作为本地 ROS1 包纳入工程，并包含标准 `package.xml`；
+`fastlivo` 组会先构建该驱动。不应从当前工程路径直接执行上游的
+`livox_ros_driver2/build.sh`，该脚本假定驱动直接位于工作区 `src/` 下。
 
 启动并验收 MID360：
 

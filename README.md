@@ -10,6 +10,13 @@
 git clone git@github.com:HIT-K1928-LAB/Fast-Drone-XI35.git
 ```
 
+如需在本地查看或手动构建 Livox-SDK2，可选初始化 SDK 子模块：
+
+``` bash
+git submodule update --init --recursive -- \
+  third_party/Livox-SDK2
+```
+
 ### 编译代码
 
 在项目主目录运行脚本
@@ -19,7 +26,7 @@ git clone git@github.com:HIT-K1928-LAB/Fast-Drone-XI35.git
 
 ### 仿真环境飞行
 
-初始化仿真环境模块仓库
+初始化仿真环境子模块仓库
 
 ``` bash
 git submodule update --init --recursive -- \
