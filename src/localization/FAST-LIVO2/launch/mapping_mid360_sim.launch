@@ -1,14 +1,18 @@
 <launch>
   <arg name="rviz" default="true"/>
+  <arg name="config_file" default="$(find fast_livo)/config/mid360_sim.yaml"/>
+  <arg name="camera_config_file" default="$(find fast_livo)/config/camera_realsense_sim.yaml"/>
+  <arg name="lidar_topic" default="/livox/lidar"/>
 
   <rosparam command="load"
-            file="$(find fast_livo)/config/mid360_sim.yaml"/>
+            file="$(arg config_file)"/>
+  <param name="common/lid_topic" value="$(arg lidar_topic)"/>
 
   <node pkg="fast_livo"
         type="fastlivo_mapping"
         name="laserMapping"
         output="screen">
-    <rosparam file="$(find fast_livo)/config/camera_realsense_sim.yaml"/>
+    <rosparam file="$(arg camera_config_file)"/>
   </node>
 
   <!-- Gazebo SDF joints are not automatically inserted into the ROS TF tree. -->

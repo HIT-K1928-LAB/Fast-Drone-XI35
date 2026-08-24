@@ -1,0 +1,14 @@
+# Intrinsics and distortion copied from the Gazebo stereo_camera/model.sdf
+# left camera used by iris_3d_gpu_lidar.
+cam_model: Pinhole
+cam_width: 640
+cam_height: 480
+scale: 1.0
+cam_fx: 320.0
+cam_fy: 320.0
+cam_cx: 320.0
+cam_cy: 240.0
+cam_d0: -0.1
+cam_d1: 0.01
+cam_d2: 0.00005
+cam_d3: -0.0001

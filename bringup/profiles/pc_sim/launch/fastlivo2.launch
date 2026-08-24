@@ -1,0 +1,10 @@
+<launch>
+  <include file="$(find fast_livo)/launch/mapping_mid360_sim.launch">
+    <arg name="rviz" value="false"/>
+    <arg name="config_file"
+         value="$(dirname)/../config/fastlivo2/gpu_lidar_sim.yaml"/>
+    <arg name="camera_config_file"
+         value="$(dirname)/../config/fastlivo2/camera_stereo_sim.yaml"/>
+    <arg name="lidar_topic" value="/iris_0/velodyne_points_fastlivo"/>
+  </include>
+</launch>

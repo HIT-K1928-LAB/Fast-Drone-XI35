@@ -1,4 +1,5 @@
 <launch>
+    <arg name="odom_topic" default="/vins_fusion/imu_propagate"/>
 
     <!-- search strategy waypoints (Convenience for template generation)-->
     <arg name="point_num" value="3" />
@@ -30,7 +31,7 @@
         <param name="sent_colla_signal_dura" value="5.0" type="double"/>
         <param name="enable_colla_mode" value="true" type="bool"/>
 
-        <param name="odom_topic" value="/vins_fusion/imu_propagate" type="string"/>
+        <param name="odom_topic" value="$(arg odom_topic)" type="string"/>
         <param name="exec_frequency" value="100" type="double"/>
         <param name="arrive_threshold" value="0.5" type="double"/>
         <param name="publish_target_threshold" value="0.2" type="double"/>

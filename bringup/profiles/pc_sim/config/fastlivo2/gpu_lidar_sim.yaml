@@ -1,0 +1,99 @@
+common:
+  img_topic: "/iris_0/stereo_camera/left/image_raw"
+  lid_topic: "/iris_0/velodyne_points_fastlivo"
+  imu_topic: "/iris_0/imu_gazebo"
+  img_en: true
+  lidar_en: true
+  ros_driver_bug_fix: false
+
+extrin_calib:
+  # iris_3d_gpu_lidar.sdf positions in base_link:
+  #   simulated IMU: include (0, 0, -0.05) + sensor (0, 0, 0.30)
+  #   GPU LiDAR:     (0, 0, 0.08)
+  # Transform a LiDAR point into the simulated IMU frame.
+  extrinsic_T: [0.0, 0.0, -0.17]
+  extrinsic_R: [1, 0, 0,
+                0, 1, 0,
+                0, 0, 1]
+  # Left camera origin is (0.10, 0.06, 0) in base_link. Transform the
+  # LiDAR FLU frame into the left optical frame.
+  Rcl: [0, -1, 0,
+        0,  0, -1,
+        1,  0, 0]
+  Pcl: [0.06, -0.08, -0.10]
+
+time_offset:
+  imu_time_offset: 0.0
+  img_time_offset: 0.0
+  exposure_time_init: 0.0
+
+preprocess:
+  point_filter_num: 1
+  filter_size_surf: 0.1
+  # FAST-LIVO2's Velodyne handler uses ring and reconstructs point time
+  # from azimuth. The simulated sensor therefore runs at 10 Hz.
+  lidar_type: 2
+  scan_line: 32
+  blind: 0.3
+
+vio:
+  max_iterations: 5
+  outlier_threshold: 1000
+  img_point_cov: 100
+  patch_size: 8
+  patch_pyrimid_level: 4
+  normal_en: true
+  raycast_en: false
+  inverse_composition_en: false
+  exposure_estimate_en: true
+  inv_expo_cov: 0.1
+
+imu:
+  imu_en: true
+  imu_int_frame: 50
+  acc_cov: 0.1
+  gyr_cov: 0.1
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+
+lio:
+  max_iterations: 5
+  dept_err: 0.02
+  beam_err: 0.05
+  min_eigen_value: 0.0025
+  voxel_size: 0.5
+  max_layer: 2
+  max_points_num: 50
+  layer_init_num: [5, 5, 5, 5, 5]
+
+local_map:
+  map_sliding_en: false
+  half_map_size: 100
+  sliding_thresh: 8
+
+uav:
+  # pc_sim/config/px4ctrl consumes /LIVO2/imu_propagate.
+  imu_rate_odom: true
+  gravity_align_en: true
+
+publish:
+  dense_map_en: false
+  pub_effect_point_en: false
+  pub_plane_en: false
+  pub_scan_num: 1
+  blind_rgb_points: 0.0
+
+evo:
+  seq_name: "iris_3d_gpu_lidar_sim"
+  pose_output_en: false
+
+pcd_save:
+  pcd_save_en: false
+  type: 0
+  colmap_output_en: false
+  filter_size_pcd: 0.15
+  interval: -1
+
+image_save:
+  img_save_en: false
+  interval: 1
