@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 
 import base64
+import fcntl
 import os
 from pathlib import Path
+import pty
+import select
 import shlex
 import signal
+import struct
 import subprocess
 import tempfile
+import termios
 import time
 import unittest
 import uuid
@@ -60,6 +65,128 @@ class FlightDispatchTest(unittest.TestCase):
 
 
 class ProfileTmuxRuntimeTest(unittest.TestCase):
+    def test_exit_status_button_closes_only_the_clicked_session(self):
+        socket_name = f"fastdrone_exit_click_{uuid.uuid4().hex}"
+        tmux = ["tmux", "-L", socket_name]
+        attach_pid = None
+        attach_fd = None
+
+        subprocess.run(
+            [
+                *tmux,
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                "clicked",
+                "sleep 30",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                *tmux,
+                "new-session",
+                "-d",
+                "-s",
+                "other",
+                "sleep 30",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        try:
+            configured = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"source {shlex.quote(str(RUNTIME))}; "
+                    f"FASTDRONE_TMUX_SOCKET={shlex.quote(socket_name)}; "
+                    "SESSION=clicked; configure_tmux_session",
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+
+            attach_pid, attach_fd = pty.fork()
+            if attach_pid == 0:
+                os.environ["TERM"] = "xterm-256color"
+                os.execvp(
+                    "tmux",
+                    (
+                        "tmux",
+                        "-L",
+                        socket_name,
+                        "attach-session",
+                        "-t",
+                        "clicked",
+                    ),
+                )
+            fcntl.ioctl(
+                attach_fd,
+                termios.TIOCSWINSZ,
+                struct.pack("HHHH", 24, 80, 0, 0),
+            )
+            time.sleep(0.2)
+            while select.select([attach_fd], [], [], 0)[0]:
+                os.read(attach_fd, 65536)
+
+            os.write(attach_fd, b"\x1b[<0;75;24M")
+            output = bytearray()
+            for _ in range(100):
+                if subprocess.run(
+                    [*tmux, "has-session", "-t", "clicked"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                ).returncode != 0:
+                    break
+                if select.select([attach_fd], [], [], 0.02)[0]:
+                    try:
+                        output.extend(os.read(attach_fd, 65536))
+                    except OSError:
+                        pass
+            else:
+                self.fail(
+                    "EXIT SESSION mouse click left the session alive: "
+                    + output.decode("utf-8", "backslashreplace")[-500:]
+                )
+
+            other_exists = subprocess.run(
+                [*tmux, "has-session", "-t", "other"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode == 0
+            self.assertTrue(other_exists, "EXIT SESSION killed another session")
+        finally:
+            if attach_fd is not None:
+                try:
+                    os.close(attach_fd)
+                except OSError:
+                    pass
+            if attach_pid is not None:
+                try:
+                    os.kill(attach_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(attach_pid, 0)
+                except ChildProcessError:
+                    pass
+            subprocess.run(
+                [*tmux, "kill-server"],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+
     def test_ctrl_c_allows_graceful_exit_before_forced_cleanup(self):
         child_pid = None
         child_pgid = None
@@ -224,6 +351,113 @@ run_tmux_profile "$@"
                     except ProcessLookupError:
                         pass
 
+    def test_killing_tmux_session_stops_detached_descendant_group(self):
+        socket_name = f"fastdrone_detached_{uuid.uuid4().hex}"
+        tmux = ["tmux", "-L", socket_name]
+        detached_pid = None
+        detached_pgid = None
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            workspace = temporary / "workspace"
+            setup = workspace / "devel/setup.bash"
+            setup.parent.mkdir(parents=True)
+            setup.write_text("")
+            gate = temporary / "layout-ready"
+            gate.touch()
+            detached_identity = temporary / "detached-process"
+            fixture = temporary / "profile-tmux.sh"
+            fixture.write_text(
+                f'''#!/usr/bin/env bash
+set -eu
+WORKSPACE={shlex.quote(str(workspace))}
+PROFILE_DIR={shlex.quote(str(temporary))}
+PROFILE_NAME=detached_test
+PROFILE_MODE=test
+PROFILE_TMUX_SCRIPT={shlex.quote(str(fixture))}
+ROS_MASTER_URI_DEFAULT=http://127.0.0.1:11311
+ROS_IP_DEFAULT=127.0.0.1
+source {shlex.quote(str(RUNTIME))}
+run_tmux_profile "$@"
+'''
+            )
+            detached_body = (
+                "trap '' HUP INT TERM; "
+                f"printf '%s %s' \"$$\" \"$(ps -o pgid= -p $$)\" > "
+                f"{shlex.quote(str(detached_identity))}; "
+                "while :; do sleep 1; done"
+            )
+            manager_body = (
+                f"setsid bash -c {shlex.quote(detached_body)} & wait"
+            )
+            pane_command = f"bash -c {shlex.quote(manager_body)}"
+            encoded_command = base64.b64encode(
+                pane_command.encode()
+            ).decode()
+
+            subprocess.run(
+                [
+                    *tmux,
+                    "-f",
+                    "/dev/null",
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "test",
+                    (
+                        f"FASTDRONE_TMUX_SOCKET={socket_name} "
+                        f"bash {shlex.quote(str(fixture))} --pane-shell "
+                        f"ready {shlex.quote(str(gate))} "
+                        f"{encoded_command} auto"
+                    ),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            try:
+                for _ in range(100):
+                    if detached_identity.exists():
+                        break
+                    time.sleep(0.02)
+                self.assertTrue(
+                    detached_identity.exists(),
+                    "detached pane descendant did not start",
+                )
+                detached_pid, detached_pgid = map(
+                    int, detached_identity.read_text().split()
+                )
+
+                subprocess.run(
+                    [*tmux, "kill-session", "-t", "test"],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                for _ in range(200):
+                    try:
+                        os.kill(detached_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail(
+                        "detached pane descendant "
+                        f"{detached_pid} survived tmux exit"
+                    )
+            finally:
+                subprocess.run(
+                    [*tmux, "kill-server"],
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                )
+                if detached_pgid and detached_pgid != os.getpgrp():
+                    try:
+                        os.killpg(detached_pgid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
     def test_attach_cleanup_disables_terminal_mouse_reporting(self):
         socket_name = f"fastdrone_attach_{uuid.uuid4().hex}"
         tmux = ["tmux", "-L", socket_name]
@@ -381,8 +615,7 @@ printf '|%s' "${SETUP_OBSERVED-unset}"
                 line for line in root_bindings.splitlines()
                 if "MouseDown1StatusRight" in line
             )
-            self.assertIn("kill-session -t", exit_binding)
-            self.assertIn("#{session_name}", exit_binding)
+            self.assertIn("kill-session", exit_binding)
         finally:
             subprocess.run(
                 [*tmux, "kill-server"],

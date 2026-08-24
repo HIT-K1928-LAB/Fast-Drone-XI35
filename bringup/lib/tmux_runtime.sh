@@ -40,7 +40,7 @@ configure_tmux_session() {
     tmux_cmd set-option -t "$SESSION" @fastdrone_exit_button 1
     tmux_cmd bind-key -T root MouseDown1StatusRight \
         if-shell -F '#{==:#{@fastdrone_exit_button},1}' \
-        'kill-session -t "#{session_name}"' \
+        'kill-session' \
         'display-message "No action"'
 }
 
@@ -70,14 +70,93 @@ attach_tmux_session() {
 }
 
 FASTDRONE_PANE_PROCESS_GROUP=""
+FASTDRONE_PANE_PROCESS_GROUPS=""
 
-wait_for_pane_process_group() {
-    local process_group="$1"
-    local max_attempts="$2"
-    local attempt
+collect_descendant_process_groups() {
+    local root_pid="$1"
+
+    python3 - "$root_pid" <<'PY'
+import os
+import sys
+
+root_pid = int(sys.argv[1])
+processes = {}
+children = {}
+for entry in os.scandir("/proc"):
+    if not entry.name.isdigit():
+        continue
+    try:
+        stat = open(f"/proc/{entry.name}/stat", encoding="utf-8").read()
+        fields = stat[stat.rfind(")") + 2:].split()
+        pid = int(entry.name)
+        parent_pid = int(fields[1])
+        process_group = int(fields[2])
+    except (FileNotFoundError, IndexError, PermissionError, ValueError):
+        continue
+    processes[pid] = process_group
+    children.setdefault(parent_pid, []).append(pid)
+
+descendants = []
+pending = [root_pid]
+while pending:
+    parent_pid = pending.pop()
+    for child_pid in children.get(parent_pid, ()):
+        descendants.append(child_pid)
+        pending.append(child_pid)
+
+seen = set()
+for pid in (*descendants, root_pid):
+    process_group = processes.get(pid)
+    if process_group and process_group not in seen:
+        seen.add(process_group)
+        print(process_group)
+PY
+}
+
+refresh_pane_process_groups() {
+    local root_pid="${FASTDRONE_PANE_PROCESS_GROUP:-}"
+    local own_group process_group discovered_groups
+    if [ -z "$root_pid" ]; then
+        return
+    fi
+
+    own_group="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
+    discovered_groups="$(collect_descendant_process_groups "$root_pid")"
+    for process_group in $discovered_groups; do
+        if [ "$process_group" = "$own_group" ]; then
+            continue
+        fi
+        case " $FASTDRONE_PANE_PROCESS_GROUPS " in
+            *" $process_group "*) ;;
+            *)
+                FASTDRONE_PANE_PROCESS_GROUPS="${FASTDRONE_PANE_PROCESS_GROUPS:+$FASTDRONE_PANE_PROCESS_GROUPS }$process_group"
+                ;;
+        esac
+    done
+}
+
+signal_pane_process_groups() {
+    local signal_name="$1"
+    local process_group
+
+    for process_group in $FASTDRONE_PANE_PROCESS_GROUPS; do
+        command kill "-$signal_name" -- "-$process_group" 2>/dev/null || true
+    done
+}
+
+wait_for_pane_process_groups() {
+    local max_attempts="$1"
+    local attempt process_group any_alive
 
     for attempt in $(seq 1 "$max_attempts"); do
-        if ! command kill -0 -- "-$process_group" 2>/dev/null; then
+        any_alive=0
+        for process_group in $FASTDRONE_PANE_PROCESS_GROUPS; do
+            if command kill -0 -- "-$process_group" 2>/dev/null; then
+                any_alive=1
+                break
+            fi
+        done
+        if [ "$any_alive" -eq 0 ]; then
             return 0
         fi
         sleep 0.05
@@ -91,28 +170,38 @@ stop_pane_process_group() {
         return
     fi
 
-    command kill -TERM -- "-$process_group" 2>/dev/null || true
-    if ! wait_for_pane_process_group "$process_group" 20; then
-        command kill -KILL -- "-$process_group" 2>/dev/null || true
+    refresh_pane_process_groups
+    signal_pane_process_groups TERM
+    if ! wait_for_pane_process_groups 20; then
+        signal_pane_process_groups KILL
     fi
     wait "$process_group" 2>/dev/null || true
     FASTDRONE_PANE_PROCESS_GROUP=""
+    FASTDRONE_PANE_PROCESS_GROUPS=""
 }
 
 exit_pane_on_signal() {
     local exit_status="$1"
     trap - EXIT HUP INT TERM
-    stop_pane_process_group
+    interrupt_pane_process_group
     exit "$exit_status"
 }
 
 interrupt_pane_process_group() {
     local process_group="${FASTDRONE_PANE_PROCESS_GROUP:-}"
     if [ -n "$process_group" ]; then
-        command kill -INT -- "-$process_group" 2>/dev/null || true
-        if ! wait_for_pane_process_group "$process_group" 40; then
-            stop_pane_process_group
+        refresh_pane_process_groups
+        signal_pane_process_groups INT
+        if ! wait_for_pane_process_groups 40; then
+            refresh_pane_process_groups
+            signal_pane_process_groups TERM
+            if ! wait_for_pane_process_groups 20; then
+                signal_pane_process_groups KILL
+            fi
         fi
+        wait "$process_group" 2>/dev/null || true
+        FASTDRONE_PANE_PROCESS_GROUP=""
+        FASTDRONE_PANE_PROCESS_GROUPS=""
     fi
 }
 
@@ -130,6 +219,7 @@ for signal_number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
 os.execvp("setsid", ("setsid", "bash", "-c", sys.argv[1]))
 ' "$pane_command" &
     FASTDRONE_PANE_PROCESS_GROUP=$!
+    FASTDRONE_PANE_PROCESS_GROUPS=""
     trap 'stop_pane_process_group' EXIT
     trap 'exit_pane_on_signal 129' HUP
     trap 'interrupt_pane_process_group' INT

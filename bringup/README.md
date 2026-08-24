@@ -69,7 +69,8 @@ bash bringup/flight.sh pc_sim
 - 普通拖拽写入的是 tmux buffer，不要再用 `Ctrl + Shift + V` 粘贴，
   否则得到的是外层终端剪贴板中的旧内容。
 - pane 中按 `Ctrl-C` 后先给节点 2 秒优雅退出时间；仍未退出时再依次
-  使用 `SIGTERM` 和 `SIGKILL`，最长约 3 秒。
+  使用 `SIGTERM` 和 `SIGKILL`，最长约 3 秒。清理范围包含 roslaunch
+  创建的独立进程组，例如 Gazebo、PX4 和 ROS 节点。
 - `q` 或 `Esc` 退出复制/翻页模式。
 - 右下角 `EXIT SESSION` 关闭当前整个 session 的所有 window、pane 及其
   子进程组，不影响其他 tmux session。
