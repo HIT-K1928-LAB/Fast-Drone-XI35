@@ -31,3 +31,6 @@ libcustom_layernorm.so
 
 # Ignore TensorRT buffer library files.
 /src/realflight_modules/VINS-Fusion-gpu/superpoint/3rdparty/tensorrtbuffer/lib/*
+
+# Claude Code local settings.
+.claude/
