@@ -49,9 +49,13 @@ int main(int argc, char *argv[]) {
             param.mavros_ns + "/rc/in", 10, boost::bind(&RC_Data_t::feed, &fsm.rc_data, _1));
     }
 
-    ros::Subscriber bat_sub = nh.subscribe<sensor_msgs::BatteryState>(
-        param.mavros_ns + "/battery", 100, boost::bind(&Battery_Data_t::feed, &fsm.bat_data, _1),
-        ros::VoidConstPtr(), ros::TransportHints().tcpNoDelay());
+    ros::Subscriber bat_sub;
+    if (param.thr_map.use_battery_feedback) {
+        bat_sub = nh.subscribe<sensor_msgs::BatteryState>(
+            param.mavros_ns + "/battery", 100,
+            boost::bind(&Battery_Data_t::feed, &fsm.bat_data, _1), ros::VoidConstPtr(),
+            ros::TransportHints().tcpNoDelay());
+    }
 
     ros::Subscriber takeoff_land_sub = nh.subscribe<quadrotor_msgs::TakeoffLand>(
         "takeoff_land", 100, boost::bind(&Takeoff_Land_Data_t::feed, &fsm.takeoff_land_data, _1),
@@ -73,14 +77,18 @@ int main(int argc, char *argv[]) {
     fsm.set_bat_freq =
         nh.serviceClient<mavros_msgs::MessageInterval>(param.mavros_ns + "/set_message_interval");
     mavros_msgs::MessageInterval srv;
-    srv.request.message_id   = param.mavros_battery_id;    // /mavros/battery ID
-    srv.request.message_rate = param.mavros_bat_msg_freq;  // 10Hz
-    if (fsm.set_bat_freq.call(srv)) {
-        ROS_INFO(
-            "set bat message frequent %fHz result: %d", srv.request.message_rate,
-            srv.response.success);
+    if (param.thr_map.use_battery_feedback) {
+        srv.request.message_id   = param.mavros_battery_id;    // /mavros/battery ID
+        srv.request.message_rate = param.mavros_bat_msg_freq;  // 10Hz
+        if (fsm.set_bat_freq.call(srv)) {
+            ROS_INFO(
+                "set bat message frequent %fHz result: %d", srv.request.message_rate,
+                srv.response.success);
+        } else {
+            ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
+        }
     } else {
-        ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
+        ROS_INFO("[px4ctrl] Battery feedback disabled; using hover_percentage for initialization.");
     }
 
     srv.request.message_id   = param.mavros_attitude_id;        // ATTITUDE

@@ -65,6 +65,190 @@ class FlightDispatchTest(unittest.TestCase):
 
 
 class ProfileTmuxRuntimeTest(unittest.TestCase):
+    def test_auto_pane_up_arrow_repeats_its_launch_command(self):
+        socket_name = f"fastdrone_auto_history_{uuid.uuid4().hex}"
+        tmux = ["tmux", "-L", socket_name]
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            workspace = temporary / "workspace"
+            setup = workspace / "devel/setup.bash"
+            setup.parent.mkdir(parents=True)
+            setup.write_text("")
+            gate = temporary / "layout-ready"
+            gate.touch()
+            marker = temporary / "auto-runs"
+            fixture = temporary / "profile-tmux.sh"
+            fixture.write_text(
+                f'''#!/usr/bin/env bash
+set -eu
+WORKSPACE={shlex.quote(str(workspace))}
+PROFILE_DIR={shlex.quote(str(temporary))}
+PROFILE_NAME=auto_history_test
+PROFILE_MODE=test
+PROFILE_TMUX_SCRIPT={shlex.quote(str(fixture))}
+ROS_MASTER_URI_DEFAULT=http://127.0.0.1:11311
+ROS_IP_DEFAULT=127.0.0.1
+source {shlex.quote(str(RUNTIME))}
+run_tmux_profile "$@"
+'''
+            )
+            pane_command = f"printf 'run\\n' >> {shlex.quote(str(marker))}"
+            encoded_command = base64.b64encode(
+                pane_command.encode()
+            ).decode()
+
+            subprocess.run(
+                [
+                    *tmux,
+                    "-f",
+                    "/dev/null",
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "test",
+                    (
+                        f"HOME={shlex.quote(str(temporary))} "
+                        f"FASTDRONE_TMUX_SOCKET={socket_name} "
+                        f"bash {shlex.quote(str(fixture))} --pane-shell "
+                        f"ready {shlex.quote(str(gate))} "
+                        f"{encoded_command} auto"
+                    ),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            try:
+                for _ in range(100):
+                    if marker.exists() and marker.read_text().splitlines() == ["run"]:
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail("auto pane launch command did not run once")
+
+                time.sleep(0.1)
+                subprocess.run(
+                    [*tmux, "send-keys", "-t", "test:0.0", "Up", "Enter"],
+                    check=True,
+                )
+                for _ in range(100):
+                    if marker.read_text().splitlines() == ["run", "run"]:
+                        break
+                    time.sleep(0.02)
+                else:
+                    captured = subprocess.run(
+                        [*tmux, "capture-pane", "-p", "-t", "test:0.0"],
+                        check=True,
+                        text=True,
+                        capture_output=True,
+                    ).stdout
+                    self.fail(
+                        "Up arrow did not repeat the auto pane command:\n"
+                        + captured
+                    )
+            finally:
+                subprocess.run(
+                    [*tmux, "kill-server"],
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                )
+
+    def test_manual_pane_up_arrow_repeats_its_launch_command(self):
+        socket_name = f"fastdrone_history_{uuid.uuid4().hex}"
+        tmux = ["tmux", "-L", socket_name]
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            workspace = temporary / "workspace"
+            setup = workspace / "devel/setup.bash"
+            setup.parent.mkdir(parents=True)
+            setup.write_text("")
+            gate = temporary / "layout-ready"
+            gate.touch()
+            marker = temporary / "manual-runs"
+            fixture = temporary / "profile-tmux.sh"
+            fixture.write_text(
+                f'''#!/usr/bin/env bash
+set -eu
+WORKSPACE={shlex.quote(str(workspace))}
+PROFILE_DIR={shlex.quote(str(temporary))}
+PROFILE_NAME=history_test
+PROFILE_MODE=test
+PROFILE_TMUX_SCRIPT={shlex.quote(str(fixture))}
+ROS_MASTER_URI_DEFAULT=http://127.0.0.1:11311
+ROS_IP_DEFAULT=127.0.0.1
+source {shlex.quote(str(RUNTIME))}
+run_tmux_profile "$@"
+'''
+            )
+            pane_command = f"printf 'run\\n' >> {shlex.quote(str(marker))}"
+            encoded_command = base64.b64encode(
+                pane_command.encode()
+            ).decode()
+
+            subprocess.run(
+                [
+                    *tmux,
+                    "-f",
+                    "/dev/null",
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "test",
+                    (
+                        f"HOME={shlex.quote(str(temporary))} "
+                        f"FASTDRONE_TMUX_SOCKET={socket_name} "
+                        f"bash {shlex.quote(str(fixture))} --pane-shell "
+                        f"ready {shlex.quote(str(gate))} "
+                        f"{encoded_command} manual"
+                    ),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            try:
+                subprocess.run(
+                    [*tmux, "send-keys", "-t", "test:0.0", "Enter"],
+                    check=True,
+                )
+                for _ in range(100):
+                    if marker.exists() and marker.read_text().splitlines() == ["run"]:
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail("manual pane launch command did not run once")
+
+                time.sleep(0.1)
+                subprocess.run(
+                    [*tmux, "send-keys", "-t", "test:0.0", "Up", "Enter"],
+                    check=True,
+                )
+                for _ in range(100):
+                    if marker.read_text().splitlines() == ["run", "run"]:
+                        break
+                    time.sleep(0.02)
+                else:
+                    captured = subprocess.run(
+                        [*tmux, "capture-pane", "-p", "-t", "test:0.0"],
+                        check=True,
+                        text=True,
+                        capture_output=True,
+                    ).stdout
+                    self.fail(
+                        "Up arrow did not repeat the pane launch command:\n"
+                        + captured
+                    )
+            finally:
+                subprocess.run(
+                    [*tmux, "kill-server"],
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                )
+
     def test_exit_status_button_closes_only_the_clicked_session(self):
         socket_name = f"fastdrone_exit_click_{uuid.uuid4().hex}"
         tmux = ["tmux", "-L", socket_name]
@@ -548,6 +732,160 @@ printf '|%s' "${SETUP_OBSERVED-unset}"
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "nounset-on|")
+
+    def test_session_timestamp_names_the_shared_ros_log_root(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace = Path(temporary_directory)
+            setup = workspace / "devel/setup.bash"
+            setup.parent.mkdir()
+            setup.write_text("")
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    '''
+source "$1"
+WORKSPACE="$2"
+PROFILE_DIR="$2/profile"
+PROFILE_NAME=pc_sim
+PROFILE_MODE=lidar
+ROS_MASTER_URI_DEFAULT=http://127.0.0.1:11311
+ROS_IP_DEFAULT=127.0.0.1
+FASTDRONE_SESSION_START=2026-08-25_15-42-18
+setup_profile_runtime_environment
+first_log_dir="$ROS_LOG_DIR"
+setup_profile_runtime_environment
+printf '%s\n%s\n%s' \
+    "$first_log_dir" \
+    "$ROS_LOG_DIR" \
+    "$(readlink "$WORKSPACE/log/latest" 2>/dev/null || printf missing)"
+''',
+                    "runtime-test",
+                    str(RUNTIME),
+                    str(workspace),
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+
+            expected = (
+                workspace
+                / "log/2026-08-25_15-42-18_pc_sim_lidar"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [str(expected), str(expected), expected.name],
+            )
+
+    def test_existing_tmux_server_keeps_all_panes_in_one_session_log_root(self):
+        socket_name = f"fastdrone_log_env_{uuid.uuid4().hex}"
+        tmux = ["tmux", "-L", socket_name]
+        launcher = None
+
+        subprocess.run(
+            [
+                *tmux,
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                "stale_environment",
+                "sleep 30",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("FASTDRONE_SESSION_")
+            },
+        )
+        try:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary = Path(temporary_directory)
+                workspace = temporary / "workspace"
+                setup = workspace / "devel/setup.bash"
+                setup.parent.mkdir(parents=True)
+                setup.write_text("")
+                first_log_root = temporary / "first-log-root"
+                second_log_root = temporary / "second-log-root"
+                fixture = temporary / "profile-tmux.sh"
+                fixture.write_text(
+                    f'''#!/usr/bin/env bash
+set -eu
+WORKSPACE={shlex.quote(str(workspace))}
+PROFILE_DIR={shlex.quote(str(temporary))}
+PROFILE_NAME=pc_sim
+PROFILE_MODE=lidar
+PROFILE_TMUX_SCRIPT={shlex.quote(str(fixture))}
+ROS_MASTER_URI_DEFAULT=http://127.0.0.1:11311
+ROS_IP_DEFAULT=127.0.0.1
+source {shlex.quote(str(RUNTIME))}
+build_profile_layout() {{
+    new_window first "printenv ROS_LOG_DIR > {shlex.quote(str(first_log_root))}" auto
+    new_window second "printenv ROS_LOG_DIR > {shlex.quote(str(second_log_root))}" auto
+}}
+run_tmux_profile "$@"
+'''
+                )
+
+                launcher = subprocess.Popen(
+                    [
+                        "script",
+                        "-qefc",
+                        (
+                            f"FASTDRONE_TMUX_SOCKET={shlex.quote(socket_name)} "
+                            f"bash {shlex.quote(str(fixture))}"
+                        ),
+                        "/dev/null",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, "TERM": "xterm-256color"},
+                )
+
+                for _ in range(200):
+                    if (
+                        first_log_root.exists()
+                        and first_log_root.stat().st_size > 0
+                        and second_log_root.exists()
+                        and second_log_root.stat().st_size > 0
+                    ):
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail("tmux panes did not report their ROS log roots")
+
+                first = Path(first_log_root.read_text().strip())
+                second = Path(second_log_root.read_text().strip())
+                self.assertEqual(first, second)
+                self.assertEqual(first.parent, workspace / "log")
+                self.assertRegex(
+                    first.name,
+                    r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_pc_sim_lidar$",
+                )
+                self.assertEqual(
+                    os.readlink(workspace / "log/latest"),
+                    first.name,
+                )
+        finally:
+            subprocess.run(
+                [*tmux, "kill-server"],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            if launcher is not None:
+                try:
+                    launcher.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    launcher.kill()
+                    launcher.wait(timeout=2)
 
     def test_runtime_uses_tmux_buffer_for_mouse_copy_and_paste(self):
         socket_name = f"fastdrone_test_{uuid.uuid4().hex}"

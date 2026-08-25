@@ -6,8 +6,8 @@ Dependency: Eigen
 
 ## rosout_file_logger
 
-Record `/rosout_agg` messages into per-node files under a timestamped
-subdirectory in the current ROS log directory:
+Record `/rosout_agg` messages into per-node files under the `nodes`
+subdirectory in the current ROS run directory:
 
 ```bash
 rosrun uav_utils rosout_file_logger
@@ -19,13 +19,11 @@ or:
 roslaunch uav_utils rosout_file_logger.launch
 ```
 
-Each logger run creates a new directory named by the logger node start time,
-with second precision. Each ROS node gets its own file in that directory, for
-example:
+Each ROS node gets its own file in that directory, for example:
 
 ```text
-2026-06-04_14-40-58/vins_fusion.log
-2026-06-04_14-40-58/px4ctrl.log
+nodes/vins_fusion.log
+nodes/px4ctrl.log
 ```
 
 The line format is:
@@ -42,8 +40,8 @@ messages to disk in batches to avoid flushing on every ROS log message. Runtime
 parameters:
 
 ```bash
-rosrun uav_utils rosout_file_logger _flush_period:=0.5 _max_queue_size:=10000 _max_batch_size:=1000 _flush_streams:=true _include_node_name:=true _include_location:=true
-roslaunch uav_utils rosout_file_logger.launch flush_period:=0.5 max_queue_size:=10000 max_batch_size:=1000 flush_streams:=true include_node_name:=true include_location:=true
+rosrun uav_utils rosout_file_logger _flush_period:=0.5 _max_queue_size:=10000 _max_batch_size:=1000 _flush_streams:=true _include_node_name:=true _include_location:=true _subdirectory:=nodes
+roslaunch uav_utils rosout_file_logger.launch flush_period:=0.5 max_queue_size:=10000 max_batch_size:=1000 flush_streams:=true include_node_name:=true include_location:=true subdirectory:=nodes
 ```
 
 - `flush_period`: seconds between batch writes.
@@ -52,6 +50,7 @@ roslaunch uav_utils rosout_file_logger.launch flush_period:=0.5 max_queue_size:=
 - `flush_streams`: whether to flush file streams after each batch.
 - `include_node_name`: whether each line includes the ROS node name, such as `[/vins_fusion]`.
 - `include_location`: whether each line includes source location, such as `[rosNodeTest.cpp:main:197]`.
+- `subdirectory`: one safe directory name under the current ROS run directory; defaults to `nodes`.
 
 This package is deliberately designed not to find Eigen automatically, because there are many cases that you would like to use your own Eigen instead of that in the system directory (**/usr/include/eigen3**).
 

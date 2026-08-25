@@ -49,6 +49,8 @@ void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
     read_essential_param(nh, "thrust_model/K2", thr_map.K2);
     read_essential_param(nh, "thrust_model/K3", thr_map.K3);
     read_essential_param(nh, "thrust_model/accurate_thrust_model", thr_map.accurate_thrust_model);
+    nh.param("thrust_model/use_battery_feedback", thr_map.use_battery_feedback, true);
+    nh.param("thrust_model/online_estimation", thr_map.online_estimation, true);
     read_essential_param(nh, "thrust_model/hover_percentage", thr_map.hover_percentage);
     read_essential_param(
         nh, "thrust_model/imu_acc_lpf_freq_cutoff", thr_map.imu_acc_lpf_freq_cutoff);

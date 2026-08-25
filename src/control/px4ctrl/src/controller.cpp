@@ -122,6 +122,8 @@ double LinearControl::computeDesiredCollectiveThrustSignal(const Eigen::Vector3d
 }
 
 bool LinearControl::estimateThrustModel(const Eigen::Vector3d &est_a, const Parameter_t &param) {
+    if (!param.thr_map.online_estimation) return false;
+
     ros::Time t_now = ros::Time::now();
     while (timed_thrust_.size() >= 1) {
         // Choose data before 35~45ms ago
@@ -153,7 +155,8 @@ bool LinearControl::estimateThrustModel(const Eigen::Vector3d &est_a, const Para
         thr2acc_     = thr2acc_ + K * (est_a(2) - thr * thr2acc_);
         P_           = (1 - K * thr) * P_ / rho2_;
         if (param_.thr_map.print_val == true) {
-            printf("%6.3f,%6.3f,%6.3f,%6.3f,%6.3f,%6.3f\n", est_a(2), thr, thr2acc_, gamma, K, P_);
+            ROS_INFO(
+                "%6.3f,%6.3f,%6.3f,%6.3f,%6.3f,%6.3f\n", est_a(2), thr, thr2acc_, gamma, K, P_);
             fflush(stdout);
         }
 
@@ -165,6 +168,8 @@ bool LinearControl::estimateThrustModel(const Eigen::Vector3d &est_a, const Para
 
 bool LinearControl::estimateThrustModel(
     const Eigen::Vector3d &est_a, const Parameter_t &param, const Battery_Data_t &bat_data) {
+    if (!param.thr_map.online_estimation) return false;
+
     ros::Time t_now = ros::Time::now();
 
     while (!timed_thrust_.empty()) {
@@ -229,6 +234,8 @@ bool LinearControl::estimateThrustModel(
 
 bool LinearControl::estimateThrustModelUsingVelFB(
     const Eigen::Vector3d &est_v, const Parameter_t &param) {
+    if (!param.thr_map.online_estimation) return false;
+
     ros::Time t_now = ros::Time::now();
     while (timed_thrust_.size() >= 1) {
         // Choose data before 35~45ms ago

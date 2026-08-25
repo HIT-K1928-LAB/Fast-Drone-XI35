@@ -9,9 +9,29 @@ import xml.etree.ElementTree as ET
 WORKSPACE = Path(__file__).resolve().parents[2]
 PROFILES_DIR = WORKSPACE / "bringup/profiles"
 HARDWARE_PROFILES = ("pc", "xi35_10", "xi35_default")
+ROSOUT_LOGGER_LAUNCH = (
+    WORKSPACE
+    / "src/common/utilities/uav_utils/launch/rosout_file_logger.launch"
+)
 
 
 class ProfileLaunchLayoutTest(unittest.TestCase):
+    def test_rosout_logger_uses_a_stable_nodes_subdirectory(self):
+        root = ET.parse(ROSOUT_LOGGER_LAUNCH).getroot()
+        arguments = {
+            argument.attrib["name"]: argument.attrib.get("default")
+            for argument in root.findall("arg")
+        }
+        parameters = {
+            parameter.attrib["name"]: parameter.attrib["value"]
+            for parameter in root.find("node").findall("param")
+        }
+
+        self.assertIn("subdirectory", arguments)
+        self.assertIn("subdirectory", parameters)
+        self.assertEqual(arguments.get("subdirectory"), "nodes")
+        self.assertEqual(parameters.get("subdirectory"), "$(arg subdirectory)")
+
     def test_hardware_profiles_keep_algorithm_files_under_config(self):
         expected = (
             "config/vins/fast_drone_250.yaml",

@@ -30,6 +30,8 @@ class Parameter_t {
         double K2;
         double K3;
         bool accurate_thrust_model;
+        bool use_battery_feedback{true};
+        bool online_estimation{true};
         double hover_percentage;
         double imu_acc_lpf_freq_cutoff;
     };

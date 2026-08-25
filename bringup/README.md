@@ -60,25 +60,39 @@ tmux kill-session -t fd_pc_sim_lidar
 bash bringup/flight.sh pc_sim
 ```
 
-## tmux 鼠标与复制
+## tmux 支持操作
 
 - 滚轮进入 tmux 历史并上下翻页。
 - tmux 内部复制粘贴：左键拖拽并松开，然后按鼠标中键或右键粘贴。
 - 系统剪贴板复制粘贴：按住 `Shift` 再用左键拖拽，按
   `Ctrl + Shift + C` 复制，使用 `Ctrl + Shift + V` 粘贴。
-- 普通拖拽写入的是 tmux buffer，不要再用 `Ctrl + Shift + V` 粘贴，
-  否则得到的是外层终端剪贴板中的旧内容。
-- pane 中按 `Ctrl-C` 后先给节点 2 秒优雅退出时间；仍未退出时再依次
-  使用 `SIGTERM` 和 `SIGKILL`，最长约 3 秒。清理范围包含 roslaunch
-  创建的独立进程组，例如 Gazebo、PX4 和 ROS 节点。
-- `q` 或 `Esc` 退出复制/翻页模式。
 - 右下角 `EXIT SESSION` 关闭当前整个 session 的所有 window、pane 及其
   子进程组，不影响其他 tmux session。
+- 可以鼠标点击下面标签页实现快速切换窗口
+- 可以鼠标点击分栏的窗口实现快速切换光标位置
 
-Ptyxis/VTE 不接受 OSC52 写剪贴板，因此 tmux buffer 和系统剪贴板使用
-两套明确的操作方式。
+## 日志目录
 
-## 二次开发边界
+每次新建 tmux session 时，公共运行时会按本机时间创建一个日志目录：
+
+```text
+log/2026-08-25_15-42-18_pc_sim_lidar/
+├── latest -> <ROS run_id>
+└── <ROS run_id>/
+    ├── master.log
+    ├── roslaunch-*.log
+    ├── *-stdout.log
+    └── nodes/
+        ├── px4ctrl.log
+        └── fast_livo2.log
+```
+
+同一 session 的所有 window 和 pane 共用该目录。项目根目录下的
+`log/latest` 使用相对符号链接指向最近创建的 session 日志目录，因此在
+宿主机和容器中都可以直接打开。如果同一秒创建同名 session，目录名会依次
+追加 `_02`、`_03`，不会覆盖已有日志。
+
+## 二次开发
 
 - 增删 window/pane：修改对应机型的 `tmux.sh`。
 - 修改 topic、remap、模型或扫描周期：修改对应机型的 `launch/`。

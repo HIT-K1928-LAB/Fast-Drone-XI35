@@ -153,6 +153,8 @@ class PX4CtrlFSM {
     void set_start_pose_for_takeoff_land(const Odom_Data_t &odom);
     Desired_State_t get_rotor_speed_up_des(const ros::Time now);
     Desired_State_t get_takeoff_land_des(const double speed);
+    void reset_thrust_mapping();
+    void estimate_thrust_mapping();
 
     // ---- tools ----
     void set_hov_with_odom();

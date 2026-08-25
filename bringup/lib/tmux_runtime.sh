@@ -231,6 +231,49 @@ os.execvp("setsid", ("setsid", "bash", "-c", sys.argv[1]))
     return "$command_status"
 }
 
+open_interactive_pane_shell() {
+    local previous_command="${1:-}"
+    local rc_file
+
+    if [ -z "$previous_command" ]; then
+        exec bash --noprofile --norc -i
+    fi
+
+    rc_file="$(mktemp "${TMPDIR:-/tmp}/fastdrone-pane-bashrc.XXXXXX")" || return
+    printf 'command rm -f %q\nbuiltin history -s %q\n' \
+        "$rc_file" "$previous_command" >"$rc_file"
+    exec bash --noprofile --rcfile "$rc_file" -i
+}
+
+setup_session_log_environment() {
+    local log_root="$WORKSPACE/log"
+    local session_dir suffix=2
+    local created_session_root=0
+
+    if [ -z "${FASTDRONE_SESSION_LOG_ROOT:-}" ]; then
+        FASTDRONE_SESSION_START="${FASTDRONE_SESSION_START:-$(date +%Y-%m-%d_%H-%M-%S)}"
+        session_dir="${FASTDRONE_SESSION_START}_${PROFILE_NAME}_${PROFILE_MODE}"
+        FASTDRONE_SESSION_LOG_ROOT="$log_root/$session_dir"
+        while [ -e "$FASTDRONE_SESSION_LOG_ROOT" ]; do
+            FASTDRONE_SESSION_LOG_ROOT="$log_root/${session_dir}_$(printf '%02d' "$suffix")"
+            suffix=$((suffix + 1))
+        done
+        created_session_root=1
+    fi
+
+    mkdir -p "$FASTDRONE_SESSION_LOG_ROOT"
+    if [ "$created_session_root" -eq 1 ]; then
+        if [ ! -e "$log_root/latest" ] || [ -L "$log_root/latest" ]; then
+            ln -sfn "$(basename "$FASTDRONE_SESSION_LOG_ROOT")" "$log_root/latest"
+        else
+            echo "Cannot update log/latest: path exists and is not a symlink" >&2
+        fi
+    fi
+
+    export FASTDRONE_SESSION_START FASTDRONE_SESSION_LOG_ROOT
+    export ROS_LOG_DIR="$FASTDRONE_SESSION_LOG_ROOT"
+}
+
 setup_profile_runtime_environment() {
     if [ ! -f "$WORKSPACE/devel/setup.bash" ]; then
         echo "Required file not found: $WORKSPACE/devel/setup.bash" >&2
@@ -258,8 +301,7 @@ setup_profile_runtime_environment() {
         return "$fastdrone_setup_status"
     fi
 
-    export ROS_LOG_DIR="$WORKSPACE/log"
-    mkdir -p "$ROS_LOG_DIR"
+    setup_session_log_environment
 
     if declare -F setup_profile_environment >/dev/null; then
         setup_profile_environment
@@ -305,6 +347,15 @@ build_command_plan() {
     printf '%s' "$plan"
 }
 
+build_profile_pane_invocation() {
+    local ready_signal="$1"
+    local command_plan="$2"
+
+    printf 'FASTDRONE_SESSION_START=%q FASTDRONE_SESSION_LOG_ROOT=%q bash %q --pane-shell %q %q%s' \
+        "$FASTDRONE_SESSION_START" "$FASTDRONE_SESSION_LOG_ROOT" \
+        "$PROFILE_TMUX_SCRIPT" "$ready_signal" "$LAYOUT_GATE" "$command_plan"
+}
+
 new_window() {
     local name="$1"
     shift
@@ -319,10 +370,11 @@ new_window() {
     fi
 
     local signal="${SESSION}_${name}_ready"
-    local pane command_plan
+    local pane command_plan pane_invocation
     command_plan="$(build_command_plan "$@")"
+    pane_invocation="$(build_profile_pane_invocation "$signal" "$command_plan")"
     tmux_cmd new-window -d -t "$SESSION" -n "$name" -c "$WORKSPACE" \
-        "bash '$PROFILE_TMUX_SCRIPT' --pane-shell '$signal' '$LAYOUT_GATE'$command_plan"
+        "$pane_invocation"
     tmux_cmd wait-for "$signal"
     pane="$(tmux_cmd display-message -p -t "$SESSION:$name" '#{pane_id}')"
     tmux_cmd select-pane -t "$pane" -T "$name"
@@ -342,9 +394,10 @@ add_pane() {
         return
     fi
 
-    local pane pane_count split_direction command_plan
+    local pane pane_count split_direction command_plan pane_invocation
     local signal="${SESSION}_${window}_${title}_ready"
     command_plan="$(build_command_plan "$@")"
+    pane_invocation="$(build_profile_pane_invocation "$signal" "$command_plan")"
     pane_count="$(tmux_cmd list-panes -t "$SESSION:$window" | wc -l)"
     if [ "$pane_count" -eq 1 ]; then
         split_direction="-h"
@@ -354,7 +407,7 @@ add_pane() {
     pane="$(tmux_cmd split-window \
         "$split_direction" -d -t "$SESSION:$window" -c "$WORKSPACE" \
         -P -F '#{pane_id}' \
-        "bash '$PROFILE_TMUX_SCRIPT' --pane-shell '$signal' '$LAYOUT_GATE'$command_plan")"
+        "$pane_invocation")"
     tmux_cmd wait-for "$signal"
     tmux_cmd select-pane -t "$pane" -T "$title"
     tmux_cmd select-layout -t "$SESSION:$window" tiled >/dev/null
@@ -376,6 +429,7 @@ run_profile_pane_shell() {
     export PS1='\u@\h:\w\$ '
     set +e
     local prompt_mark pane_prompt encoded_command run_mode pane_command edited
+    local previous_command=""
     if [ "$(id -u)" -eq 0 ]; then prompt_mark='#'; else prompt_mark='$'; fi
     pane_prompt="$(id -un)@${HOSTNAME%%.*}:$PWD${prompt_mark} "
 
@@ -387,18 +441,20 @@ run_profile_pane_shell() {
         case "$run_mode" in
             auto)
                 run_managed_pane_command "$pane_command"
+                previous_command="$pane_command"
                 ;;
             manual)
-                trap 'printf "\n"; stty sane; exec bash --noprofile --norc -i' INT
+                trap 'printf "\n"; stty sane; open_interactive_pane_shell "$previous_command"' INT
                 if IFS= read -e -r -i "$pane_command" -p "$pane_prompt" edited; then
                     trap - INT
                     run_managed_pane_command "$edited"
+                    previous_command="$edited"
                 fi
                 trap - INT
                 ;;
         esac
     done
-    exec bash --noprofile --norc -i
+    open_interactive_pane_shell "$previous_command"
 }
 
 create_status_window() {
@@ -419,7 +475,7 @@ create_status_window() {
     fi
     camera_type="${CAMERA_TYPE:-unknown}"
 
-    local status_command status_encoded status_signal
+    local status_command status_encoded status_signal status_plan pane_invocation
     status_signal="${SESSION}_status_ready"
     printf -v status_command \
         "printf '\\n  Fast-Drone flight session\\n\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n  %-14s : %%s\\n\\n' %q %q %q %q %q %q %q %q %q %q" \
@@ -429,8 +485,10 @@ create_status_window() {
         "$ROS_IP" "$PROFILE_DIR" "$PROFILE_TMUX_SCRIPT" "$git_branch" \
         "$git_commit" "$git_worktree"
     status_encoded="$(printf '%s' "$status_command" | base64 -w 0)"
+    status_plan=" '$status_encoded' auto"
+    pane_invocation="$(build_profile_pane_invocation "$status_signal" "$status_plan")"
     tmux_cmd new-session -d -s "$SESSION" -n status -c "$WORKSPACE" \
-        "bash '$PROFILE_TMUX_SCRIPT' --pane-shell '$status_signal' '$LAYOUT_GATE' '$status_encoded' auto"
+        "$pane_invocation"
     tmux_cmd wait-for "$status_signal"
 }
 
@@ -468,15 +526,16 @@ run_tmux_profile() {
         return 127
     fi
 
-    setup_profile_runtime_environment
     SESSION="fd_${PROFILE_NAME}_${PROFILE_MODE}"
-    LAYOUT_GATE="/tmp/${SESSION}_layout_ready"
-    rm -f "$LAYOUT_GATE"
 
     if tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
         attach_tmux_session
         return
     fi
+
+    setup_profile_runtime_environment
+    LAYOUT_GATE="/tmp/${SESSION}_layout_ready"
+    rm -f "$LAYOUT_GATE"
 
     create_status_window
     configure_tmux_session

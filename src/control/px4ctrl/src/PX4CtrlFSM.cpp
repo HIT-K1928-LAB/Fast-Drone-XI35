@@ -106,7 +106,7 @@ void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &d
 
     if (odom_data.p(2) >= takeoff_land_ctx.start_pose(2) + param.takeoff_land.height) {
         state = AUTO_HOVER;
-        controller.resetThrustMapping(bat_data);
+        reset_thrust_mapping();
         set_hov_with_odom();
 
         ROS_INFO("\033[32m[px4ctrl] AUTO_TAKEOFF --> AUTO_HOVER(L2)\033[32m");
@@ -390,7 +390,7 @@ bool PX4CtrlFSM::enterManualFromOffboard() {
 }
 
 bool PX4CtrlFSM::enterAutoHover() {
-    controller.resetThrustMapping(bat_data);
+    reset_thrust_mapping();
     set_hov_with_odom();
 
     if (!toggle_offboard_mode(true)) {
@@ -404,7 +404,7 @@ bool PX4CtrlFSM::enterAutoHover() {
 }
 
 bool PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
-    controller.resetThrustMapping(bat_data);
+    reset_thrust_mapping();
     set_start_pose_for_takeoff_land(odom_data);
 
     if (state_data.current_state.mode != "OFFBOARD") {
@@ -480,15 +480,11 @@ void PX4CtrlFSM::process() {
         ros::Time now = ros::Time::now();
         double delta_t =
             (now - takeoff_land_ctx.command_time).toSec() - TakeoffLandContext::MOTORS_SPEEDUP_TIME;
-        if (delta_t > 0.2) controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
+        if (delta_t > 0.2) estimate_thrust_mapping();
     }
 
     if (state == AUTO_HOVER || state == CMD_CTRL) {
-        // controller.estimateThrustModel(imu_data.a, bat_data.volt, param);
-        // controller.estimateThrustModel(imu_data.a, param);
-        // controller.estimateThrustModelUsingVelFB(odom_data.v, param);
-        controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
-        // controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
+        estimate_thrust_mapping();
     }
 
     // STEP3: solve and update new control commands
@@ -701,7 +697,26 @@ bool PX4CtrlFSM::imu_is_received(const ros::Time &now_time) const {
 }
 
 bool PX4CtrlFSM::bat_is_received(const ros::Time &now_time) const {
+    if (!param.thr_map.use_battery_feedback) return true;
     return (now_time - bat_data.rcv_stamp).toSec() < param.msg_timeout.bat;
+}
+
+void PX4CtrlFSM::reset_thrust_mapping() {
+    if (param.thr_map.use_battery_feedback) {
+        controller.resetThrustMapping(bat_data);
+    } else {
+        controller.resetThrustMapping();
+    }
+}
+
+void PX4CtrlFSM::estimate_thrust_mapping() {
+    if (!param.thr_map.online_estimation) return;
+
+    if (param.thr_map.use_battery_feedback) {
+        controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
+    } else {
+        controller.estimateThrustModel(imu_acc_lpf, param);
+    }
 }
 
 bool PX4CtrlFSM::recv_new_odom() {
