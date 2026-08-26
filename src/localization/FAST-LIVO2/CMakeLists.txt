@@ -172,3 +172,23 @@ target_link_libraries(fastlivo_mapping
 if(mimalloc_FOUND)
   target_link_libraries(fastlivo_mapping mimalloc)
 endif()
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(fast_livo_vio_safety_test
+    test/test_vio_safety.cpp
+  )
+  if(TARGET fast_livo_vio_safety_test)
+    target_link_libraries(fast_livo_vio_safety_test
+      vio
+      lio
+      ${catkin_LIBRARIES}
+      ${PCL_LIBRARIES}
+      ${OpenCV_LIBRARIES}
+      ${Sophus_LIBRARIES}
+      ${Boost_LIBRARIES}
+    )
+    if(OpenMP_CXX_FOUND)
+      target_link_libraries(fast_livo_vio_safety_test OpenMP::OpenMP_CXX)
+    endif()
+  endif()
+endif()
