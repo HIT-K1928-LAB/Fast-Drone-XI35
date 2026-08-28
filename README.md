@@ -27,6 +27,13 @@ make pc
 make pc_sim
 ```
 
+如需在本地查看或手动构建 Livox-SDK2，可选初始化 SDK 子模块：
+
+``` bash
+git submodule update --init --recursive -- \
+  third_party/Livox-SDK2
+```
+
 ### 编译代码
 
 在项目主目录运行脚本
@@ -36,7 +43,7 @@ make pc_sim
 
 ### 仿真环境飞行
 
-初始化仿真环境模块仓库
+初始化仿真环境子模块仓库
 
 ``` bash
 git submodule update --init --recursive --progress -- \
@@ -59,7 +66,7 @@ make px4_sitl_default gazebo
 启动总入口
 
 ``` bash
-bash bringup/tmux/flight.sh pc_sim
+bash bringup/flight.sh pc_sim
 ```
 
 在1:simulator窗口可以启动相应的仿真launch文件
@@ -100,8 +107,9 @@ CH8:emergency kill 紧急停桨
 
 ## 文档
 
+- [仿真环境使用文档](docs/simulation.md)
 - [Bringup 使用说明](bringup/README.md)
-- [tmux唯一启动入口使用说明](bringup/tmux/README.md)
+- [统一启动入口使用说明](bringup/README.md)
 - [硬件资料](hardware/README.md)
 - [Docker 使用说明](docker/README.md)
 

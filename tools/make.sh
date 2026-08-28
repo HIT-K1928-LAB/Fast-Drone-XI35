@@ -8,11 +8,21 @@ SRC_DIR="${WORKSPACE_ROOT}/src"
 DEFAULT_BUILD_TYPE="Release"
 CATKIN_LOG_SPACE="build/logs"
 
+# RK3588 Fast-LIVO build set. Add or remove ROS package names here as needed.
+# catkin_tools will also build any required package dependencies automatically.
+RK3588_FASTLIVO_PACKAGES=(
+  livox_ros_driver2
+  vikit_common
+  vikit_ros
+  fast_livo
+)
+
 usage() {
   cat <<'EOF'
 Usage:
   tools/make.sh all [options]              Build all catkin packages with catkin build
   tools/make.sh pkg <package> [options]    Build one catkin package with catkin build
+  tools/make.sh fastlivo [options]         Build the RK3588 Fast-LIVO package set
   tools/make.sh clean [options]            Clean catkin build products
   tools/make.sh list [--paths]             List packages in this workspace
   tools/make.sh completion                 Print bash completion script
@@ -40,6 +50,7 @@ Clean options:
 Examples:
   tools/make.sh all
   tools/make.sh all -c
+  tools/make.sh fastlivo -c
   tools/make.sh pkg yopo_planner
   tools/make.sh pkg quadrotor_msgs -c -j8
   tools/make.sh clean
@@ -204,6 +215,10 @@ run_catkin_build() {
   fi
 
   cmake_args+=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
+  # livox_ros_driver2 selects its ROS 1 CMake branch with this variable.
+  # The workspace is ROS Noetic, so keeping it explicit also makes a fresh
+  # RK3588 container build independent of any previous catkin configuration.
+  cmake_args+=("-DROS_EDITION=ROS1")
 
   if [[ "${EXPORT_COMPILE_COMMANDS}" == true ]]; then
     cmake_args+=("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
@@ -268,6 +283,20 @@ EOF
 
   parse_build_options "$@"
   run_catkin_build "${package}"
+}
+
+build_fastlivo() {
+  local package
+
+  for package in "${RK3588_FASTLIVO_PACKAGES[@]}"; do
+    if ! package_exists "${package}"; then
+      echo "Unknown Fast-LIVO package in RK3588_FASTLIVO_PACKAGES: ${package}" >&2
+      return 2
+    fi
+  done
+
+  parse_build_options "$@"
+  run_catkin_build "${RK3588_FASTLIVO_PACKAGES[@]}"
 }
 
 clean_products() {
@@ -366,7 +395,7 @@ _fast_drone_make_completion() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   script="${COMP_WORDS[0]}"
-  commands="all pkg package clean list ls completion help"
+  commands="all pkg package fastlivo clean list ls completion help"
 
   case "${COMP_CWORD}" in
     1)
@@ -382,6 +411,8 @@ _fast_drone_make_completion() {
         COMPREPLY=( $(compgen -W "${packages}" -- "${cur}") )
         return 0
       fi
+      ;;
+    fastlivo)
       ;;
     list|ls)
       COMPREPLY=( $(compgen -W "--paths -p --names-only --help -h" -- "${cur}") )
@@ -429,6 +460,9 @@ main() {
       ;;
     pkg|package)
       build_package "$@"
+      ;;
+    fastlivo)
+      build_fastlivo "$@"
       ;;
     clean)
       clean_products "$@"

@@ -1,0 +1,14 @@
+<launch>
+  <arg name="input_topic" default="/iris_0/velodyne_points"/>
+  <arg name="output_topic" default="/iris_0/velodyne_points_fastlivo"/>
+  <arg name="scan_period" default="0.1"/>
+
+  <node pkg="simulation_bridges"
+        type="velodyne_pointcloud_bridge_node"
+        name="velodyne_pointcloud_bridge"
+        output="screen">
+    <param name="input_topic" value="$(arg input_topic)"/>
+    <param name="output_topic" value="$(arg output_topic)"/>
+    <param name="scan_period" value="$(arg scan_period)"/>
+  </node>
+</launch>

@@ -1,0 +1,9 @@
+<launch>
+  <include file="$(find simulation_bridges)/launch/gazebo_ground_truth.launch">
+    <arg name="model_name" value="iris_0"/>
+    <arg name="input_topic" value="/gazebo/model_states"/>
+    <arg name="output_topic" value="/gazebo/iris_0/odometry"/>
+    <arg name="frame_id" value="world"/>
+    <arg name="child_frame_id" value="base_link"/>
+  </include>
+</launch>

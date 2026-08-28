@@ -1,0 +1,14 @@
+<launch>
+  <arg name="input_topic" default="/scan"/>
+  <arg name="output_topic" default="/livox/lidar"/>
+  <arg name="scan_period" default="0.1"/>
+  <arg name="line_count" default="4"/>
+
+  <node pkg="simulation_bridges" type="livox_pointcloud_bridge_node"
+        name="livox_pointcloud_bridge" output="screen">
+    <param name="input_topic" value="$(arg input_topic)"/>
+    <param name="output_topic" value="$(arg output_topic)"/>
+    <param name="scan_period" value="$(arg scan_period)"/>
+    <param name="line_count" value="$(arg line_count)"/>
+  </node>
+</launch>

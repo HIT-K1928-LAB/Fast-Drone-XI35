@@ -47,12 +47,14 @@ class PX4CtrlFSM {
     ros::Publisher traj_start_trigger_pub;
     ros::Publisher ctrl_FCU_pub;
     ros::Publisher debug_pub;  // debug
+    ros::Publisher tune_debug_pub;
     ros::ServiceClient set_FCU_mode_srv;
     ros::ServiceClient arming_client_srv;
     ros::ServiceClient reboot_FCU_srv;
     ros::ServiceClient set_bat_freq;
 
     quadrotor_msgs::Px4ctrlDebug debug_msg;  // debug
+    quadrotor_msgs::Px4ctrlTuneDebug tune_debug_msg;
 
     Eigen::Vector4d hover_pose;
     ros::Time last_set_hover_pose_time;
@@ -153,6 +155,8 @@ class PX4CtrlFSM {
     void set_start_pose_for_takeoff_land(const Odom_Data_t &odom);
     Desired_State_t get_rotor_speed_up_des(const ros::Time now);
     Desired_State_t get_takeoff_land_des(const double speed);
+    void reset_thrust_mapping();
+    void estimate_thrust_mapping();
 
     // ---- tools ----
     void set_hov_with_odom();

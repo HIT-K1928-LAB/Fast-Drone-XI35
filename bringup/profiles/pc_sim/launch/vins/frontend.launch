@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find superpoint)/launch/superpoint_frontend.launch">
+    <arg name="config_file"
+         value="$(dirname)/../../config/vins/fast_drone_250.yaml"/>
+    <arg name="imu_topic" value="/iris_0/imu_gazebo"/>
+  </include>
+</launch>

@@ -85,6 +85,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   pcl_ros
   tf
+  livox_ros_driver2
   eigen_conversions
   vikit_common
   vikit_ros
@@ -104,8 +105,28 @@ find_package(Boost REQUIRED COMPONENTS thread)
 
 # Define the catkin package
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs sensor_msgs roscpp rospy std_msgs pcl_ros tf eigen_conversions vikit_common vikit_ros cv_bridge_454 image_transport visualization_msgs
+  CATKIN_DEPENDS
+    geometry_msgs
+    nav_msgs
+    sensor_msgs
+    roscpp
+    rospy
+    std_msgs
+    pcl_ros
+    tf
+    livox_ros_driver2
+    eigen_conversions
+    vikit_common
+    vikit_ros
+    cv_bridge_454
+    image_transport
+    visualization_msgs
   DEPENDS EIGEN3 PCL OpenCV Sophus
+)
+
+catkin_install_python(PROGRAMS
+  scripts/hikrobot_mvs_node.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
 # Include directories for dependencies
@@ -128,6 +149,11 @@ add_library(laser_mapping src/LIVMapper.cpp)
 # Add the main executable
 add_executable(fastlivo_mapping src/main.cpp)
 
+# Ensure livox_ros_driver2 message headers exist before compiling subscribers.
+add_dependencies(pre ${catkin_EXPORTED_TARGETS})
+add_dependencies(laser_mapping ${catkin_EXPORTED_TARGETS})
+add_dependencies(fastlivo_mapping ${catkin_EXPORTED_TARGETS})
+
 # Link libraries to the executable
 target_link_libraries(fastlivo_mapping
   laser_mapping
@@ -145,4 +171,24 @@ target_link_libraries(fastlivo_mapping
 # Link mimalloc if found
 if(mimalloc_FOUND)
   target_link_libraries(fastlivo_mapping mimalloc)
+endif()
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(fast_livo_vio_safety_test
+    test/test_vio_safety.cpp
+  )
+  if(TARGET fast_livo_vio_safety_test)
+    target_link_libraries(fast_livo_vio_safety_test
+      vio
+      lio
+      ${catkin_LIBRARIES}
+      ${PCL_LIBRARIES}
+      ${OpenCV_LIBRARIES}
+      ${Sophus_LIBRARIES}
+      ${Boost_LIBRARIES}
+    )
+    if(OpenMP_CXX_FOUND)
+      target_link_libraries(fast_livo_vio_safety_test OpenMP::OpenMP_CXX)
+    endif()
+  endif()
 endif()

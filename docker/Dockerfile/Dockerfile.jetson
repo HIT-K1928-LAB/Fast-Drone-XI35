@@ -20,6 +20,8 @@ ARG CERES_VERSION=2.0.0rc1
 ARG SOPHUS_REPOSITORY=https://github.com/strasdat/Sophus.git
 ARG SOPHUS_COMMIT=a621ff2e56c56c839a6c40418d42c3c254424b5c
 ARG VISION_OPENCV_VERSION=1.16.2
+ARG LIVOX_SDK2_REPOSITORY=https://github.com/Livox-SDK/Livox-SDK2.git
+ARG LIVOX_SDK2_COMMIT=f5d9375f84efe2b15bc0a052d3e18482ed13adf4
 ARG GLOG_REPOSITORY=https://github.com/boboxxd/glog.git
 ARG GLOG_VERSION=master
 ENV FDRONE_WS=/root/Fast-Drone-XI35
@@ -90,6 +92,8 @@ RUN apt-get update && \
     ros-${ROS_VERSION}-image-transport-plugins \
     ros-${ROS_VERSION}-pcl-ros \
     ros-${ROS_VERSION}-message-filters \
+    ros-${ROS_VERSION}-dynamic-reconfigure \
+    ros-${ROS_VERSION}-rqt-reconfigure \
     ros-${ROS_VERSION}-tf \
     ros-${ROS_VERSION}-catkin \
     python3-catkin-tools \
@@ -126,6 +130,23 @@ RUN apt-get update && \
     echo "${TZ}" > /etc/timezone && \
     echo "source /opt/ros/${ROS_VERSION}/setup.bash" >> /root/.bashrc && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# Livox ROS Driver2 links this SDK from /usr/local/lib. The driver source is
+# mounted with the project at runtime, while the SDK is part of the image.
+RUN   for attempt in 1 2 3 4 5; do \
+          git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout \
+              ${LIVOX_SDK2_REPOSITORY} /tmp/Livox-SDK2 && break; \
+          rm -rf /tmp/Livox-SDK2; \
+          sleep 5; \
+      done && \
+      test -d /tmp/Livox-SDK2/.git && \
+      git -C /tmp/Livox-SDK2 checkout --detach ${LIVOX_SDK2_COMMIT} && \
+      cmake -S /tmp/Livox-SDK2 -B /tmp/Livox-SDK2/build \
+          -DCMAKE_BUILD_TYPE=Release && \
+      cmake --build /tmp/Livox-SDK2/build --parallel ${USE_PROC} && \
+      cmake --install /tmp/Livox-SDK2/build && \
+      ldconfig && \
+      rm -rf /tmp/Livox-SDK2
 
 # FAST-LIVO2 requires the legacy, non-templated Sophus API. The two setter
 # substitutions make that pinned revision compatible with Eigen on Ubuntu 20.04.

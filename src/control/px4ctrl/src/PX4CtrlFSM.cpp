@@ -106,7 +106,8 @@ void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &d
 
     if (odom_data.p(2) >= takeoff_land_ctx.start_pose(2) + param.takeoff_land.height) {
         state = AUTO_HOVER;
-        controller.resetThrustMapping(bat_data);
+        reset_thrust_mapping();
+        controller.resetControlState(odom_data);
         set_hov_with_odom();
 
         ROS_INFO("\033[32m[px4ctrl] AUTO_TAKEOFF --> AUTO_HOVER(L2)\033[32m");
@@ -147,6 +148,7 @@ void PX4CtrlFSM::handleAutoLand(
             if (toggle_arm_disarm(false)) {
                 print_once_flag = true;
                 state           = MANUAL_CTRL;
+                controller.resetControlState(odom_data);
                 toggle_offboard_mode(false);
 
                 ROS_INFO("\033[32m[px4ctrl] AUTO_LAND --> MANUAL_CTRL(L1)\033[32m");
@@ -355,6 +357,7 @@ bool PX4CtrlFSM::tryFallbackCmdToHover(const ros::Time &now_time, Desired_State_
     }
 
     state = AUTO_HOVER;
+    controller.resetControlState(odom_data);
     set_hov_with_odom();
     des = get_hover_des();
 
@@ -386,11 +389,13 @@ bool PX4CtrlFSM::enterManualFromOffboard() {
     }
 
     state = MANUAL_CTRL;
+    controller.resetControlState(odom_data);
     return true;
 }
 
 bool PX4CtrlFSM::enterAutoHover() {
-    controller.resetThrustMapping(bat_data);
+    reset_thrust_mapping();
+    controller.resetControlState(odom_data);
     set_hov_with_odom();
 
     if (!toggle_offboard_mode(true)) {
@@ -404,7 +409,8 @@ bool PX4CtrlFSM::enterAutoHover() {
 }
 
 bool PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
-    controller.resetThrustMapping(bat_data);
+    reset_thrust_mapping();
+    controller.resetControlState(odom_data);
     set_start_pose_for_takeoff_land(odom_data);
 
     if (state_data.current_state.mode != "OFFBOARD") {
@@ -430,6 +436,7 @@ bool PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
 }
 
 void PX4CtrlFSM::enterCmdCtrl(Desired_State_t &des) {
+    controller.resetControlState(odom_data);
     state = CMD_CTRL;
     des   = get_cmd_des();
 
@@ -437,6 +444,7 @@ void PX4CtrlFSM::enterCmdCtrl(Desired_State_t &des) {
 }
 
 void PX4CtrlFSM::enterAutoLand() {
+    controller.resetControlState(odom_data);
     state = AUTO_LAND;
     set_start_pose_for_takeoff_land(odom_data);
 
@@ -480,15 +488,11 @@ void PX4CtrlFSM::process() {
         ros::Time now = ros::Time::now();
         double delta_t =
             (now - takeoff_land_ctx.command_time).toSec() - TakeoffLandContext::MOTORS_SPEEDUP_TIME;
-        if (delta_t > 0.2) controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
+        if (delta_t > 0.2) estimate_thrust_mapping();
     }
 
     if (state == AUTO_HOVER || state == CMD_CTRL) {
-        // controller.estimateThrustModel(imu_data.a, bat_data.volt, param);
-        // controller.estimateThrustModel(imu_data.a, param);
-        // controller.estimateThrustModelUsingVelFB(odom_data.v, param);
-        controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
-        // controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
+        estimate_thrust_mapping();
     }
 
     // STEP3: solve and update new control commands
@@ -499,6 +503,18 @@ void PX4CtrlFSM::process() {
         debug_msg              = controller.calculateControl(des, odom_data, imu_data, u);
         debug_msg.header.stamp = now_time;
         debug_pub.publish(debug_msg);
+        if (param.tuning_debug.enable) {
+            tune_debug_msg                  = controller.getTuneDebug();
+            tune_debug_msg.header.stamp     = now_time;
+            tune_debug_msg.header.frame_id  = odom_data.msg.header.frame_id;
+            tune_debug_msg.fsm_state        = static_cast<uint8_t>(state);
+            const Eigen::Vector3d &specific_force_filtered =
+                flag_init_imu_acc_lpf ? imu_acc_lpf : imu_data.a;
+            tune_debug_msg.specific_force_body_filtered.x = specific_force_filtered.x();
+            tune_debug_msg.specific_force_body_filtered.y = specific_force_filtered.y();
+            tune_debug_msg.specific_force_body_filtered.z = specific_force_filtered.z();
+            tune_debug_pub.publish(tune_debug_msg);
+        }
     }
 
     // STEP4: publish control commands to mavros
@@ -701,7 +717,26 @@ bool PX4CtrlFSM::imu_is_received(const ros::Time &now_time) const {
 }
 
 bool PX4CtrlFSM::bat_is_received(const ros::Time &now_time) const {
+    if (!param.thr_map.use_battery_feedback) return true;
     return (now_time - bat_data.rcv_stamp).toSec() < param.msg_timeout.bat;
+}
+
+void PX4CtrlFSM::reset_thrust_mapping() {
+    if (param.thr_map.use_battery_feedback) {
+        controller.resetThrustMapping(bat_data);
+    } else {
+        controller.resetThrustMapping();
+    }
+}
+
+void PX4CtrlFSM::estimate_thrust_mapping() {
+    if (!param.thr_map.online_estimation) return;
+
+    if (param.thr_map.use_battery_feedback) {
+        controller.estimateThrustModel(imu_acc_lpf, param, bat_data);
+    } else {
+        controller.estimateThrustModel(imu_acc_lpf, param);
+    }
 }
 
 bool PX4CtrlFSM::recv_new_odom() {

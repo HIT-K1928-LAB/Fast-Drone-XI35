@@ -5,6 +5,7 @@
   <arg name="flush_streams" default="true"/>
   <arg name="include_node_name" default="false"/>
   <arg name="include_location" default="false"/>
+  <arg name="subdirectory" default="nodes"/>
 
   <node pkg="uav_utils" type="rosout_file_logger" name="rosout_file_logger" output="screen">
     <param name="flush_period" value="$(arg flush_period)"/>
@@ -13,5 +14,6 @@
     <param name="flush_streams" value="$(arg flush_streams)"/>
     <param name="include_node_name" value="$(arg include_node_name)"/>
     <param name="include_location" value="$(arg include_location)"/>
+    <param name="subdirectory" value="$(arg subdirectory)"/>
   </node>
 </launch>

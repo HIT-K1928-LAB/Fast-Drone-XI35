@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find simulation_bridges)/launch/velodyne_to_fastlivo.launch">
+    <arg name="input_topic" value="/iris_0/velodyne_points"/>
+    <arg name="output_topic" value="/iris_0/velodyne_points_fastlivo"/>
+    <arg name="scan_period" value="0.1"/>
+  </include>
+</launch>

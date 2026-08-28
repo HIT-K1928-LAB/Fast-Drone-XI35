@@ -1,0 +1,11 @@
+<launch>
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch"/>
+  <include file="$(find mavros)/launch/px4.launch"/>
+  <include file="$(find imu_filter)/launch/imu_filter.launch"/>
+  <include file="$(find superpoint)/launch/superpoint_frontend.launch">
+    <arg name="config_file" value="$(dirname)/../config/vins/fast_drone_250.yaml"/>
+  </include>
+  <include file="$(find vins)/launch/fast_drone_250.launch">
+    <arg name="config_file" value="$(dirname)/../config/vins/fast_drone_250.yaml"/>
+  </include>
+</launch>

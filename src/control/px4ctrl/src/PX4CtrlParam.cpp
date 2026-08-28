@@ -1,5 +1,7 @@
 #include "PX4CtrlParam.h"
 
+#include <algorithm>
+
 Parameter_t::Parameter_t() {}
 
 void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
@@ -49,9 +51,53 @@ void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
     read_essential_param(nh, "thrust_model/K2", thr_map.K2);
     read_essential_param(nh, "thrust_model/K3", thr_map.K3);
     read_essential_param(nh, "thrust_model/accurate_thrust_model", thr_map.accurate_thrust_model);
+    nh.param("thrust_model/use_battery_feedback", thr_map.use_battery_feedback, true);
+    nh.param("thrust_model/online_estimation", thr_map.online_estimation, true);
     read_essential_param(nh, "thrust_model/hover_percentage", thr_map.hover_percentage);
     read_essential_param(
         nh, "thrust_model/imu_acc_lpf_freq_cutoff", thr_map.imu_acc_lpf_freq_cutoff);
+
+    nh.param("tuning_debug/enable", tuning_debug.enable, false);
+    nh.param<std::string>(
+        "tuning_debug/topic", tuning_debug.topic, std::string("/px4ctrl/tune_debug"));
+    if (tuning_debug.enable && tuning_debug.topic.empty()) {
+        ROS_WARN("[px4ctrl] tuning_debug/topic is empty; using /px4ctrl/tune_debug.");
+        tuning_debug.topic = "/px4ctrl/tune_debug";
+    }
+
+    nh.param("velocity_filter/enable", velocity_filter.enable, true);
+    nh.param("velocity_filter/cutoff_frequency", velocity_filter.cutoff_frequency, 4.0);
+    nh.param("velocity_filter/reset_after_gap", velocity_filter.reset_after_gap, 0.2);
+
+    nh.param("control_limits/enable", control_limits.enable, true);
+    nh.param(
+        "control_limits/max_horizontal_acceleration",
+        control_limits.max_horizontal_acceleration, 2.0);
+    nh.param(
+        "control_limits/max_vertical_acceleration_up",
+        control_limits.max_vertical_acceleration_up, 2.0);
+    nh.param(
+        "control_limits/max_vertical_acceleration_down",
+        control_limits.max_vertical_acceleration_down, 2.0);
+    nh.param("control_limits/min_thrust", control_limits.min_thrust, 0.15);
+    nh.param("control_limits/max_thrust", control_limits.max_thrust, 0.90);
+
+    if (velocity_filter.cutoff_frequency <= 0.0) {
+        ROS_WARN("[px4ctrl] Non-positive velocity filter cutoff; disabling velocity filter.");
+        velocity_filter.enable = false;
+    }
+    if (velocity_filter.reset_after_gap <= 0.0) {
+        ROS_WARN("[px4ctrl] Non-positive velocity filter reset gap; using 0.2 s.");
+        velocity_filter.reset_after_gap = 0.2;
+    }
+    if (control_limits.min_thrust > control_limits.max_thrust) {
+        ROS_WARN("[px4ctrl] min_thrust exceeds max_thrust; swapping the configured values.");
+        std::swap(control_limits.min_thrust, control_limits.max_thrust);
+    }
+    control_limits.min_thrust =
+        std::max(0.0, std::min(1.0, control_limits.min_thrust));
+    control_limits.max_thrust =
+        std::max(0.0, std::min(1.0, control_limits.max_thrust));
 
     read_essential_param(nh, "mavros/namespace", mavros_ns);
     read_essential_param(nh, "mavros/bat_msg_freq", mavros_bat_msg_freq);

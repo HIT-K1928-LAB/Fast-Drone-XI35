@@ -1,0 +1,30 @@
+onnx_file: "$(find yopo_planner)/model/yopo.onnx"
+engine_file: "$(find yopo_planner)/model/yopo.engine"
+
+odom_topic: "$(arg odom_topic)"
+depth_topic: "$(arg depth_topic)"
+ctrl_topic: "$(arg ctrl_topic)"
+goal_topic: "/move_base_simple/goal"
+traj_start_topic: "/traj_start_trigger"
+wait_for_traj_start_trigger: false
+use_config_camera_extrinsic: true
+camera_extrinsic_config: "$(find vins)/../config/fast_drone_250.yaml"
+camera_extrinsic_key: "body_T_cam0"
+
+visualize: false
+verbose: false
+fp16: true
+depth_replan_rate: 0.0
+
+velocity: 5
+radio_range: 5.0
+ctrl_dt: 0.02
+arrive_distance: 1
+min_depth: 0.04
+max_depth: 20.0
+pitch_angle_deg: 0.0
+plan_from_reference: false
+
+goal_x: 0.0
+goal_y: 0.0
+goal_z: 2.0

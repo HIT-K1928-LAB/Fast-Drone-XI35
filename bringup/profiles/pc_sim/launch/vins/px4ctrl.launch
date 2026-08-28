@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find px4ctrl)/launch/run_ctrl.launch">
+    <arg name="config_file"
+         value="$(dirname)/../../config/px4ctrl/ctrl_param_fpv.yaml"/>
+    <arg name="odom_topic" value="/vins_fusion/imu_propagate"/>
+  </include>
+</launch>

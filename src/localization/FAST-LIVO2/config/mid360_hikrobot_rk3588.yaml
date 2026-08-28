@@ -1,0 +1,111 @@
+common:
+  img_topic: "/hikrobot_camera/image_raw"
+  lid_topic: "/livox/lidar"
+  imu_topic: "/livox/imu"
+  img_en: true
+  lidar_en: true
+  ros_driver_bug_fix: false
+
+# Protect the 16 GB RK3588 from a camera or SDK recovery that publishes faster
+# than the estimator can consume. The phase-based limiter tolerates normal
+# 5 Hz timestamp jitter, and both ROS and decoded-image queues stay bounded.
+image_input:
+  max_rate_hz: 5.0
+  rate_tolerance_ratio: 0.20
+  subscriber_queue_size: 3
+  buffer_max_frames: 3
+
+extrin_calib:
+  # MID360 built-in IMU to LiDAR; use the device-aligned frame convention.
+  extrinsic_T: [0.0, 0.0, 0.0]
+  extrinsic_R: [1, 0, 0,
+                0, 1, 0,
+                0, 0, 1]
+  # FAST-Calib three-scene result, 2026-08-09.
+  # T_cam_lidar: p_camera = Rcl * p_lidar + Pcl.
+  # Joint control-point RMSE: 0.133 m; maximum residual: 0.200 m.
+  Rcl: [-0.001750, -0.999988,  0.004606,
+         0.359606, -0.004927, -0.933091,
+         0.933103,  0.000023,  0.359610]
+  Pcl: [0.010167, -0.086887, -0.041776]
+
+time_offset:
+  imu_time_offset: 0.0
+  img_time_offset: 0.0
+  exposure_time_init: 0.0
+
+preprocess:
+  point_filter_num: 1
+  filter_size_surf: 0.1
+  lidar_type: 1
+  scan_line: 4
+  blind: 0.3
+
+vio:
+  max_iterations: 5
+  outlier_threshold: 1000
+  img_point_cov: 100
+  patch_size: 8
+  patch_pyrimid_level: 4
+  normal_en: true
+  raycast_en: false
+  inverse_composition_en: false
+  exposure_estimate_en: true
+  inv_expo_cov: 0.1
+  # Keep the online visual estimator bounded on the 16 GB RK3588. A Feature
+  # retains its complete reference image, so limiting only observations per
+  # point is not sufficient to bound memory.
+  visual_map_max_frame_age: 200
+  visual_map_max_points: 20000
+  visual_map_max_distance: 30.0
+  visual_map_prune_interval: 10
+  visual_point_max_observations: 15
+
+imu:
+  imu_en: true
+  imu_int_frame: 50
+  acc_cov: 0.1
+  gyr_cov: 0.1
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+
+lio:
+  max_iterations: 5
+  dept_err: 0.02
+  beam_err: 0.05
+  min_eigen_value: 0.0025
+  voxel_size: 0.5
+  max_layer: 2
+  max_points_num: 50
+  layer_init_num: [5, 5, 5, 5, 5]
+
+local_map:
+  map_sliding_en: false
+  half_map_size: 100
+  sliding_thresh: 8
+
+uav:
+  imu_rate_odom: false
+  gravity_align_en: true
+
+publish:
+  dense_map_en: false
+  pub_effect_point_en: false
+  pub_plane_en: false
+  pub_scan_num: 1
+  blind_rgb_points: 0.0
+
+evo:
+  seq_name: "mid360_hikrobot_rk3588"
+  pose_output_en: false
+
+pcd_save:
+  pcd_save_en: false
+  type: 0
+  colmap_output_en: false
+  filter_size_pcd: 0.15
+  interval: -1
+
+image_save:
+  img_save_en: false
+  interval: 1

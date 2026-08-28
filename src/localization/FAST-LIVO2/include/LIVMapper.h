@@ -46,7 +46,7 @@ public:
   void RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po);
   void RGBpointBodyToWorld(PointType const *const pi, PointType *const po);
   void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg);
-  void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_in);
+  void livox_pcl_cbk(const livox_ros_driver2::CustomMsg::ConstPtr &msg_in);
   void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in);
   void img_cbk(const sensor_msgs::ImageConstPtr &msg_in);
   void publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager);
@@ -83,9 +83,14 @@ public:
   double filter_size_pcd = 0;
   double _first_lidar_time = 0.0;
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
+  double img_max_rate_hz = 0.0;
+  double img_rate_tolerance_ratio = 0.2;
+  double next_img_accept_time = -1.0;
 
   bool lidar_map_inited = false, pcd_save_en = false, img_save_en = false, pub_effect_point_en = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
   int img_save_interval = 1, pcd_save_interval = -1, pcd_save_type = 0;
+  int img_subscriber_queue_size = 200000;
+  int img_buffer_max_frames = 0;
   int pub_scan_num = 1;
 
   StatesGroup imu_propagate, latest_ekf_state;
@@ -114,6 +119,11 @@ public:
   int lidar_en = 1;
   bool is_first_frame = false;
   int grid_size, patch_size, grid_n_width, grid_n_height, patch_pyrimid_level;
+  int visual_map_max_frame_age = 0;
+  int visual_map_max_points = 0;
+  int visual_map_prune_interval = 10;
+  int visual_point_max_observations = 30;
+  double visual_map_max_distance = 0.0;
   double outlier_threshold;
   double plot_time;
   int frame_cnt;

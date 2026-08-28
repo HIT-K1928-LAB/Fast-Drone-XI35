@@ -1,0 +1,6 @@
+<launch>
+  <include file="$(find vins)/launch/fast_drone_250.launch">
+    <arg name="config_file"
+         value="$(dirname)/../../config/vins/fast_drone_250.yaml"/>
+  </include>
+</launch>

@@ -10,3 +10,15 @@
 	path = src/simulation/gazebo_models
 	url = git@github.com:HIT-K1928-LAB/gazebo_models.git
 	branch = main
+[submodule "third_party/Livox-SDK2"]
+	path = third_party/Livox-SDK2
+	url = git@github.com:Livox-SDK/Livox-SDK2.git
+	branch = master
+[submodule "third_party/yopo"]
+	path = third_party/yopo
+	url = git@github.com:HIT-K1928-LAB/YOPO.git
+	branch = YOPO-Simple
+[submodule "third_party/px4_autopilot"]
+	path = third_party/px4_autopilot
+	url = git@github.com:PX4/PX4-Autopilot.git
+	branch = main

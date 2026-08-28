@@ -1,0 +1,8 @@
+<launch>
+  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
+    <arg name="odom_topic" value="/gazebo/iris_0/odometry"/>
+    <arg name="depth_topic" value="/iris_0/stereo_camera/depth/image_raw"/>
+    <arg name="config_file" value="$(dirname)/../../config/yopo/yopo_planner_sim.yaml"/>
+    <arg name="camera_extrinsic_config" value="$(dirname)/../../config/vins/fast_drone_250.yaml"/>
+  </include>
+</launch>

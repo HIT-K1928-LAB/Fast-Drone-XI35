@@ -1,0 +1,16 @@
+<launch>
+  <arg name="model_name" default="iris_0"/>
+  <arg name="input_topic" default="/gazebo/model_states"/>
+  <arg name="output_topic" default="/gazebo/iris_0/odometry"/>
+  <arg name="frame_id" default="world"/>
+  <arg name="child_frame_id" default="base_link"/>
+
+  <node pkg="simulation_bridges" type="gazebo_ground_truth_node"
+        name="gazebo_ground_truth" output="screen">
+    <param name="model_name" value="$(arg model_name)"/>
+    <param name="input_topic" value="$(arg input_topic)"/>
+    <param name="output_topic" value="$(arg output_topic)"/>
+    <param name="frame_id" value="$(arg frame_id)"/>
+    <param name="child_frame_id" value="$(arg child_frame_id)"/>
+  </node>
+</launch>

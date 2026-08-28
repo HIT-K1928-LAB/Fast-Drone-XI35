@@ -1,0 +1,5 @@
+<launch>
+  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
+    <arg name="odom_topic" value="/vins_fusion/imu_propagate"/>
+  </include>
+</launch>

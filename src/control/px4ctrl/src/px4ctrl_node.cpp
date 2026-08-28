@@ -1,11 +1,35 @@
 #include "PX4CtrlFSM.h"
+#include <dynamic_reconfigure/server.h>
 #include <mavros_msgs/MessageInterval.h>
+#include <px4ctrl/PIDConfig.h>
 #include <ros/ros.h>
 #include <signal.h>
 
 void mySigintHandler(int sig) {
     ROS_INFO("[PX4Ctrl] exit...");
     ros::shutdown();
+}
+
+void pidReconfigureCallback(px4ctrl::PIDConfig &config, uint32_t level, Parameter_t *param) {
+    param->gain.Kp0 = config.Kp0;
+    param->gain.Kp1 = config.Kp1;
+    param->gain.Kp2 = config.Kp2;
+
+    param->gain.Ki0 = config.Ki0;
+    param->gain.Ki1 = config.Ki1;
+    param->gain.Ki2 = config.Ki2;
+
+    param->gain.Kd0 = config.Kd0;
+    param->gain.Kd1 = config.Kd1;
+    param->gain.Kd2 = config.Kd2;
+
+    ROS_INFO(
+        "[PX4Ctrl][PID] "
+        "Kp=[%.3f %.3f %.3f] "
+        "Ki=[%.3f %.3f %.3f] "
+        "Kd=[%.3f %.3f %.3f]",
+        config.Kp0, config.Kp1, config.Kp2, config.Ki0, config.Ki1, config.Ki2, config.Kd0,
+        config.Kd1, config.Kd2);
 }
 
 int main(int argc, char *argv[]) {
@@ -18,7 +42,41 @@ int main(int argc, char *argv[]) {
     Parameter_t param;
     param.config_from_ros_handle(nh);
 
-    // Controller controller(param);
+    /***************************************************
+     * Dynamic PID reconfigure
+     ***************************************************/
+    dynamic_reconfigure::Server<px4ctrl::PIDConfig> pid_server(nh);
+
+    px4ctrl::PIDConfig pid_config;
+
+    /* Use YAML values as initial values */
+    pid_config.Kp0 = param.gain.Kp0;
+    pid_config.Kp1 = param.gain.Kp1;
+    pid_config.Kp2 = param.gain.Kp2;
+
+    pid_config.Ki0 = param.gain.Ki0;
+    pid_config.Ki1 = param.gain.Ki1;
+    pid_config.Ki2 = param.gain.Ki2;
+
+    pid_config.Kd0 = param.gain.Kd0;
+    pid_config.Kd1 = param.gain.Kd1;
+    pid_config.Kd2 = param.gain.Kd2;
+
+    /*
+     * Very important:
+     * initialize dynamic_reconfigure using the YAML values.
+     */
+    pid_server.updateConfig(pid_config);
+
+    dynamic_reconfigure::Server<px4ctrl::PIDConfig>::CallbackType pid_callback;
+
+    pid_callback = boost::bind(&pidReconfigureCallback, _1, _2, &param);
+
+    pid_server.setCallback(pid_callback);
+
+    /***************************************************
+     * Controller
+     ***************************************************/
     LinearControl controller(param);
     PX4CtrlFSM fsm(param, controller);
 
@@ -49,9 +107,13 @@ int main(int argc, char *argv[]) {
             param.mavros_ns + "/rc/in", 10, boost::bind(&RC_Data_t::feed, &fsm.rc_data, _1));
     }
 
-    ros::Subscriber bat_sub = nh.subscribe<sensor_msgs::BatteryState>(
-        param.mavros_ns + "/battery", 100, boost::bind(&Battery_Data_t::feed, &fsm.bat_data, _1),
-        ros::VoidConstPtr(), ros::TransportHints().tcpNoDelay());
+    ros::Subscriber bat_sub;
+    if (param.thr_map.use_battery_feedback) {
+        bat_sub = nh.subscribe<sensor_msgs::BatteryState>(
+            param.mavros_ns + "/battery", 100,
+            boost::bind(&Battery_Data_t::feed, &fsm.bat_data, _1), ros::VoidConstPtr(),
+            ros::TransportHints().tcpNoDelay());
+    }
 
     ros::Subscriber takeoff_land_sub = nh.subscribe<quadrotor_msgs::TakeoffLand>(
         "takeoff_land", 100, boost::bind(&Takeoff_Land_Data_t::feed, &fsm.takeoff_land_data, _1),
@@ -63,6 +125,13 @@ int main(int argc, char *argv[]) {
         nh.advertise<geometry_msgs::PoseStamped>("/traj_start_trigger", 10);
 
     fsm.debug_pub = nh.advertise<quadrotor_msgs::Px4ctrlDebug>("/debugPx4ctrl", 10);  // debug
+    if (param.tuning_debug.enable) {
+        fsm.tune_debug_pub =
+            nh.advertise<quadrotor_msgs::Px4ctrlTuneDebug>(param.tuning_debug.topic, 10);
+        ROS_INFO_STREAM("[px4ctrl] PID tuning debug enabled: " << param.tuning_debug.topic);
+    } else {
+        ROS_INFO("[px4ctrl] PID tuning debug disabled.");
+    }
 
     fsm.set_FCU_mode_srv = nh.serviceClient<mavros_msgs::SetMode>(param.mavros_ns + "/set_mode");
     fsm.arming_client_srv =
@@ -73,14 +142,18 @@ int main(int argc, char *argv[]) {
     fsm.set_bat_freq =
         nh.serviceClient<mavros_msgs::MessageInterval>(param.mavros_ns + "/set_message_interval");
     mavros_msgs::MessageInterval srv;
-    srv.request.message_id   = param.mavros_battery_id;    // /mavros/battery ID
-    srv.request.message_rate = param.mavros_bat_msg_freq;  // 10Hz
-    if (fsm.set_bat_freq.call(srv)) {
-        ROS_INFO(
-            "set bat message frequent %fHz result: %d", srv.request.message_rate,
-            srv.response.success);
+    if (param.thr_map.use_battery_feedback) {
+        srv.request.message_id   = param.mavros_battery_id;    // /mavros/battery ID
+        srv.request.message_rate = param.mavros_bat_msg_freq;  // 10Hz
+        if (fsm.set_bat_freq.call(srv)) {
+            ROS_INFO(
+                "set bat message frequent %fHz result: %d", srv.request.message_rate,
+                srv.response.success);
+        } else {
+            ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
+        }
     } else {
-        ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
+        ROS_INFO("[px4ctrl] Battery feedback disabled; using hover_percentage for initialization.");
     }
 
     srv.request.message_id   = param.mavros_attitude_id;        // ATTITUDE
@@ -93,7 +166,7 @@ int main(int argc, char *argv[]) {
         ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
     }
 
-    srv.request.message_id = param.mavros_attitude_quaternion_id;  // ATTITUDE_QUATERNION
+    srv.request.message_id   = param.mavros_attitude_quaternion_id;        // ATTITUDE_QUATERNION
     srv.request.message_rate = param.mavros_attitude_quaternion_msg_freq;  // 250Hz
     if (fsm.set_bat_freq.call(srv)) {
         ROS_INFO(

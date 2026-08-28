@@ -10,8 +10,8 @@
     <arg name="map_origin_x" value="-10.0"/>
     <arg name="map_origin_y" value="-58.0"/>
 
-    <arg name="odom_topic" value="/kf_fusion/kf_imu_odom"/>
-    
+    <arg name="odom_topic" default="/kf_fusion/kf_imu_odom"/>
+
     <!-- main algorithm params -->
     <include file="$(find ego_planner)/launch/advanced_param_exp.xml">
         <arg name="drone_id" value="$(arg drone_id)"/>

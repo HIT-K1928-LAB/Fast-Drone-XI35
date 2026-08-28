@@ -1,0 +1,99 @@
+#########################################################################
+# ⭐⭐⭐  Set parameters carefully for satisfied performance!   ⭐⭐⭐ #
+#########################################################################
+
+mass        : 1.55 # kg
+gra         : 9.81
+pose_solver : 1     # 0:From ZhepeiWang (drag & less singular) 1:From ZhepeiWang, 2:From rotor-drag
+ctrl_freq_max   : 200.0
+use_bodyrate_ctrl: false
+max_manual_vel: 2.0
+max_angle: 30  # Final roll/pitch tilt limit [deg]. Negative disables only this limit.
+low_voltage: 13.6 # 4S battery
+
+# FAST-LIVO2 velocity is noisier than simulator ground truth. The filter is updated
+# only when a new odometry timestamp arrives, not on every 200 Hz control iteration.
+velocity_filter:
+    enable: true
+    cutoff_frequency: 4.0  # Hz; start with 3~5 Hz for FAST-LIVO2
+    reset_after_gap: 0.2   # s; reset to the current measurement after a long gap
+
+# Set enable=false to recover the legacy unconstrained output. A negative vertical
+# acceleration value disables that direction's acceleration limit.
+control_limits:
+    enable: true
+    max_horizontal_acceleration: 2.0  # m/s^2, vector norm in XY
+    max_vertical_acceleration_up: 2.0  # m/s^2, excluding gravity
+    max_vertical_acceleration_down: 2.0  # m/s^2, excluding gravity
+    min_thrust: 0.15  # normalized PX4 collective thrust
+    max_thrust: 0.90
+
+# High-rate controller snapshot for PID tuning. Missing/false means no publisher is created.
+tuning_debug:
+    enable: false
+    topic: "/px4ctrl/tune_debug"
+
+rc_reverse:
+    roll: true
+    pitch: true
+    yaw: true
+    throttle: true
+
+auto_takeoff_land:
+    enable: true
+    enable_auto_arm: true
+    no_RC: true
+    takeoff_height: 1.0 # m
+    takeoff_land_speed: 0.2 # m/s
+
+thrust_model: # The model that maps thrust signal u(0~1) to real thrust force F(Unit:N): F=K1*Voltage^K2*(K3*u^2+(1-K3)*u).
+    print_value: false # display the value of “thr_scale_compensate” or “hover_percentage” during thrust model estimating.
+    accurate_thrust_model: false  # This can always enabled if don't require accurate control performance :-)
+    # 是否使用电池消息和电压初始化推力模型
+    use_battery_feedback: false
+    # 是否根据飞行中的IMU数据在线估计推力模型
+    online_estimation: true
+    # accurate thrust mapping parameters
+    K1: 0.7583 # Needs precise calibration!
+    K2: 1.6942 # Needs precise calibration!
+    K3: 0.6786 # Needs precise calibration! K3 equals THR_MDL_FAC in https://docs.px4.io/master/en/config_mc/pid_tuning_guide_multicopter.html.
+    # approximate thrust mapping parameters
+    hover_percentage: 0.705755 # 不使用电池电压时的悬停油门
+    imu_acc_lpf_freq_cutoff: 40 # imu acc raw data low pass filter cutoff frequency [Hz]
+
+gain:
+    # position
+    Kp0: 8
+    Kp1: 4.5
+    Kp2: 3.0
+    Ki0: 0.0
+    Ki1: 0.0
+    Ki2: 0.0
+    # velocity
+    Kd0: 5.0
+    Kd1: 3.2
+    Kd2: 2.0
+
+rotor_drag:
+    x: 0.0  # The reduced acceleration on each axis caused by rotor drag. Unit:(m*s^-2)/(m*s^-1).
+    y: 0.0  # Same as above
+    z: 0.0  # Same as above
+    k_thrust_horz: 0.0 # Set to 0 recommended... --
+
+msg_timeout:
+    odom: 0.5
+    rc:   0.5
+    cmd:  0.5
+    imu:  0.5
+    bat:  0.5
+
+mavros:
+    namespace: "/iris_0/mavros"
+    battery_id: 147 # BATTERY_STATUS
+    bat_msg_freq: 10 # Hz
+    attitude_id: 30 # ATTITUDE
+    attitude_msg_freq: 200 # Hz
+    attitude_quaternion_id: 31 # ATTITUDE_QUATERNION
+    attitude_quaternion_msg_freq: 250 # Hz
+    highres_imu_id: 105 # HIGHRES_IMU
+    highres_imu_msg_freq: 1000 # Hz

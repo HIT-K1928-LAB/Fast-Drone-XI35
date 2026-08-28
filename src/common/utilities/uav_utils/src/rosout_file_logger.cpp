@@ -122,14 +122,8 @@ std::string formatTime(const ros::Time& stamp) {
     return oss.str();
 }
 
-std::string formatStartTimeDirectoryName() {
-    const time_t seconds = time(nullptr);
-    struct tm local_time;
-    localtime_r(&seconds, &local_time);
-
-    std::ostringstream oss;
-    oss << std::put_time(&local_time, "%Y-%m-%d_%H-%M-%S");
-    return oss.str();
+bool validSubdirectory(const std::string& path) {
+    return !path.empty() && path != "." && path != ".." && path.find('/') == std::string::npos;
 }
 
 std::string compactLocation(const rosgraph_msgs::Log& msg) {
@@ -151,13 +145,19 @@ class RosoutFileLogger {
         pnh.param("flush_streams", flush_streams_, true);
         pnh.param("include_node_name", include_node_name_, true);
         pnh.param("include_location", include_location_, true);
+        pnh.param<std::string>("subdirectory", subdirectory_, "nodes");
 
         if (flush_period_ <= 0.0) flush_period_ = 0.5;
         if (max_queue_size_ <= 0) max_queue_size_ = 10000;
         if (max_batch_size_ <= 0) max_batch_size_ = 1000;
 
+        if (!validSubdirectory(subdirectory_)) {
+            ROS_FATAL("Invalid rosout file logger subdirectory: %s", subdirectory_.c_str());
+            throw std::runtime_error("invalid log subdirectory");
+        }
+
         const std::string ros_log_dir = resolveLogDirectory(nh_);
-        log_dir_ = ros_log_dir + "/" + formatStartTimeDirectoryName();
+        log_dir_ = ros_log_dir + "/" + subdirectory_;
         if (!makeDirectories(log_dir_)) {
             ROS_FATAL("Failed to create rosout file logger directory: %s", log_dir_.c_str());
             throw std::runtime_error("failed to create log directory");
@@ -293,6 +293,7 @@ class RosoutFileLogger {
     bool flush_streams_ = true;
     bool include_node_name_ = true;
     bool include_location_ = true;
+    std::string subdirectory_ = "nodes";
     size_t dropped_count_ = 0;
     size_t last_reported_dropped_ = 0;
 };

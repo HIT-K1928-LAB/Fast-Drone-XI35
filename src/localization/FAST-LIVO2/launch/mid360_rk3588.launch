@@ -1,0 +1,27 @@
+<launch>
+  <!-- RK3588 eth0: 192.168.1.5; connected MID360: 192.168.1.103. -->
+  <arg name="config" default="$(find fast_livo)/config/mid360_rk3588.json"/>
+  <arg name="frame_id" default="livox_frame"/>
+  <arg name="publish_freq" default="10.0"/>
+
+  <!-- xfer_format=1 publishes livox_ros_driver2/CustomMsg, consumed by FAST-LIVO2. -->
+  <param name="xfer_format" value="1"/>
+  <param name="multi_topic" value="0"/>
+  <param name="data_src" value="0"/>
+  <param name="publish_freq" type="double" value="$(arg publish_freq)"/>
+  <param name="output_data_type" value="0"/>
+  <param name="cmdline_str" type="string" value="100000000000000"/>
+  <param name="cmdline_file_path" type="string" value=""/>
+  <param name="user_config_path" type="string" value="$(arg config)"/>
+  <param name="frame_id" type="string" value="$(arg frame_id)"/>
+  <param name="enable_lidar_bag" type="bool" value="true"/>
+  <param name="enable_imu_bag" type="bool" value="true"/>
+
+  <node name="livox_lidar_publisher2"
+        pkg="livox_ros_driver2"
+        type="livox_ros_driver2_node"
+        required="true"
+        output="screen"
+        args="100000000000000"/>
+
+</launch>

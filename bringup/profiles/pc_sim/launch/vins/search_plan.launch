@@ -1,0 +1,5 @@
+<launch>
+  <include file="$(find search_plan)/launch/search_plan.launch">
+    <arg name="odom_topic" value="/vins_fusion/imu_propagate"/>
+  </include>
+</launch>

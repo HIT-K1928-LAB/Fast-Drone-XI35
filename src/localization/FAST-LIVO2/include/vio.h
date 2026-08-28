@@ -106,9 +106,17 @@ public:
   int patch_pyrimid_level, patch_size, patch_size_total, patch_size_half, border, warp_len;
   int max_iterations, total_points;
 
+  // Optional bounds for the online visual map. Non-positive values disable
+  // the corresponding bound so existing configurations keep their behavior.
+  int visual_map_max_frame_age = 0;
+  int visual_map_max_points = 0;
+  int visual_map_prune_interval = 10;
+  int visual_point_max_observations = 30;
+  double visual_map_max_distance = 0.0;
+
   double img_point_cov, outlier_threshold, ncc_thre;
   
-  SubSparseMap *visual_submap;
+  SubSparseMap *visual_submap = nullptr;
   std::vector<std::vector<V3D>> rays_with_sample_points;
 
   double compute_jacobian_time, update_ekf_time;
@@ -140,18 +148,19 @@ public:
 
   VIOManager();
   ~VIOManager();
-  void updateStateInverse(cv::Mat img, int level);
-  void updateState(cv::Mat img, int level);
+  bool updateStateInverse(const cv::Mat &img, int level);
+  bool updateState(const cv::Mat &img, int level);
   void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time);
   void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
   void generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg);
   void setImuToLidarExtrinsic(const V3D &transl, const M3D &rot);
   void setLidarToCameraExtrinsic(vector<double> &R, vector<double> &P);
   void initializeVIO();
-  void getImagePatch(cv::Mat img, V2D pc, float *patch_tmp, int level);
+  bool getImagePatch(const cv::Mat &img, const V2D &pc, float *patch_tmp, int level);
   void computeProjectionJacobian(V3D p, MD(2, 3) & J);
-  void computeJacobianAndUpdateEKF(cv::Mat img);
+  bool computeJacobianAndUpdateEKF(const cv::Mat &img);
   void resetGrid();
+  void pruneVisualMap();
   void updateVisualMapPoints(cv::Mat img);
   void getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector2d &px_ref, const Vector3d &f_ref, const double depth_ref, const SE3 &T_cur_ref,
                            const int level_ref, 
