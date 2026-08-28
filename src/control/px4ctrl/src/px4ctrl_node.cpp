@@ -1,11 +1,35 @@
 #include "PX4CtrlFSM.h"
+#include <dynamic_reconfigure/server.h>
 #include <mavros_msgs/MessageInterval.h>
+#include <px4ctrl/PIDConfig.h>
 #include <ros/ros.h>
 #include <signal.h>
 
 void mySigintHandler(int sig) {
     ROS_INFO("[PX4Ctrl] exit...");
     ros::shutdown();
+}
+
+void pidReconfigureCallback(px4ctrl::PIDConfig &config, uint32_t level, Parameter_t *param) {
+    param->gain.Kp0 = config.Kp0;
+    param->gain.Kp1 = config.Kp1;
+    param->gain.Kp2 = config.Kp2;
+
+    param->gain.Ki0 = config.Ki0;
+    param->gain.Ki1 = config.Ki1;
+    param->gain.Ki2 = config.Ki2;
+
+    param->gain.Kd0 = config.Kd0;
+    param->gain.Kd1 = config.Kd1;
+    param->gain.Kd2 = config.Kd2;
+
+    ROS_INFO(
+        "[PX4Ctrl][PID] "
+        "Kp=[%.3f %.3f %.3f] "
+        "Ki=[%.3f %.3f %.3f] "
+        "Kd=[%.3f %.3f %.3f]",
+        config.Kp0, config.Kp1, config.Kp2, config.Ki0, config.Ki1, config.Ki2, config.Kd0,
+        config.Kd1, config.Kd2);
 }
 
 int main(int argc, char *argv[]) {
@@ -18,7 +42,41 @@ int main(int argc, char *argv[]) {
     Parameter_t param;
     param.config_from_ros_handle(nh);
 
-    // Controller controller(param);
+    /***************************************************
+     * Dynamic PID reconfigure
+     ***************************************************/
+    dynamic_reconfigure::Server<px4ctrl::PIDConfig> pid_server(nh);
+
+    px4ctrl::PIDConfig pid_config;
+
+    /* Use YAML values as initial values */
+    pid_config.Kp0 = param.gain.Kp0;
+    pid_config.Kp1 = param.gain.Kp1;
+    pid_config.Kp2 = param.gain.Kp2;
+
+    pid_config.Ki0 = param.gain.Ki0;
+    pid_config.Ki1 = param.gain.Ki1;
+    pid_config.Ki2 = param.gain.Ki2;
+
+    pid_config.Kd0 = param.gain.Kd0;
+    pid_config.Kd1 = param.gain.Kd1;
+    pid_config.Kd2 = param.gain.Kd2;
+
+    /*
+     * Very important:
+     * initialize dynamic_reconfigure using the YAML values.
+     */
+    pid_server.updateConfig(pid_config);
+
+    dynamic_reconfigure::Server<px4ctrl::PIDConfig>::CallbackType pid_callback;
+
+    pid_callback = boost::bind(&pidReconfigureCallback, _1, _2, &param);
+
+    pid_server.setCallback(pid_callback);
+
+    /***************************************************
+     * Controller
+     ***************************************************/
     LinearControl controller(param);
     PX4CtrlFSM fsm(param, controller);
 
@@ -67,6 +125,13 @@ int main(int argc, char *argv[]) {
         nh.advertise<geometry_msgs::PoseStamped>("/traj_start_trigger", 10);
 
     fsm.debug_pub = nh.advertise<quadrotor_msgs::Px4ctrlDebug>("/debugPx4ctrl", 10);  // debug
+    if (param.tuning_debug.enable) {
+        fsm.tune_debug_pub =
+            nh.advertise<quadrotor_msgs::Px4ctrlTuneDebug>(param.tuning_debug.topic, 10);
+        ROS_INFO_STREAM("[px4ctrl] PID tuning debug enabled: " << param.tuning_debug.topic);
+    } else {
+        ROS_INFO("[px4ctrl] PID tuning debug disabled.");
+    }
 
     fsm.set_FCU_mode_srv = nh.serviceClient<mavros_msgs::SetMode>(param.mavros_ns + "/set_mode");
     fsm.arming_client_srv =
@@ -101,7 +166,7 @@ int main(int argc, char *argv[]) {
         ROS_ERROR("Failed to call %s/set_message_interval", param.mavros_ns.c_str());
     }
 
-    srv.request.message_id = param.mavros_attitude_quaternion_id;  // ATTITUDE_QUATERNION
+    srv.request.message_id   = param.mavros_attitude_quaternion_id;        // ATTITUDE_QUATERNION
     srv.request.message_rate = param.mavros_attitude_quaternion_msg_freq;  // 250Hz
     if (fsm.set_bat_freq.call(srv)) {
         ROS_INFO(

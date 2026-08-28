@@ -2,6 +2,7 @@
 #define __PX4CTRLPARAM_H
 
 #include <ros/ros.h>
+#include <string>
 
 class Parameter_t {
   public:
@@ -51,12 +52,35 @@ class Parameter_t {
         double speed;
     };
 
+    struct TuningDebug {
+        bool enable{false};
+        std::string topic{"/px4ctrl/tune_debug"};
+    };
+
+    struct VelocityFilter {
+        bool enable{true};
+        double cutoff_frequency{4.0};
+        double reset_after_gap{0.2};
+    };
+
+    struct ControlLimits {
+        bool enable{true};
+        double max_horizontal_acceleration{2.0};
+        double max_vertical_acceleration_up{2.0};
+        double max_vertical_acceleration_down{2.0};
+        double min_thrust{0.15};
+        double max_thrust{0.90};
+    };
+
     Gain gain;
     RotorDrag rt_drag;
     MsgTimeout msg_timeout;
     RCReverse rc_reverse;
     ThrustMapping thr_map;
     AutoTakeoffLand takeoff_land;
+    TuningDebug tuning_debug;
+    VelocityFilter velocity_filter;
+    ControlLimits control_limits;
 
     int pose_solver;
     double mass;

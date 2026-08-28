@@ -92,6 +92,8 @@ RUN apt-get update && \
     ros-${ROS_VERSION}-image-transport-plugins \
     ros-${ROS_VERSION}-pcl-ros \
     ros-${ROS_VERSION}-message-filters \
+    ros-${ROS_VERSION}-dynamic-reconfigure \
+    ros-${ROS_VERSION}-rqt-reconfigure \
     ros-${ROS_VERSION}-tf \
     ros-${ROS_VERSION}-catkin \
     python3-catkin-tools \

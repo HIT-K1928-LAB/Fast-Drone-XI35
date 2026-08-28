@@ -10,6 +10,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
+  dynamic_reconfigure
   quadrotor_msgs
   geometry_msgs
   sensor_msgs
@@ -19,6 +20,10 @@ find_package(catkin REQUIRED COMPONENTS
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 find_package(Eigen3 REQUIRED)
+
+generate_dynamic_reconfigure_options(
+  cfg/PID.cfg
+)
 
 catkin_package(
 )
@@ -39,7 +44,7 @@ add_executable(px4ctrl_node
   src/input.cpp
 )
 
-add_dependencies(px4ctrl_node quadrotor_msgs)
+add_dependencies(px4ctrl_node ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_gencfg)
 
 target_link_libraries(px4ctrl_node
   ${catkin_LIBRARIES}
@@ -54,11 +59,13 @@ if(CATKIN_ENABLE_TESTING)
     src/input.cpp
   )
   if(TARGET px4ctrl_thrust_model_test)
-    add_dependencies(px4ctrl_thrust_model_test quadrotor_msgs)
+    add_dependencies(px4ctrl_thrust_model_test ${catkin_EXPORTED_TARGETS})
     target_link_libraries(px4ctrl_thrust_model_test ${catkin_LIBRARIES})
   endif()
 endif()
 
-catkin_install_python(PROGRAMS thrust_calibrate_scrips/thrust_calibrate.py
+catkin_install_python(PROGRAMS
+  scripts/pid_setpoint_excitation.py
+  thrust_calibrate_scrips/thrust_calibrate.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

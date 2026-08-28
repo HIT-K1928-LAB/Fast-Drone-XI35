@@ -107,6 +107,7 @@ void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &d
     if (odom_data.p(2) >= takeoff_land_ctx.start_pose(2) + param.takeoff_land.height) {
         state = AUTO_HOVER;
         reset_thrust_mapping();
+        controller.resetControlState(odom_data);
         set_hov_with_odom();
 
         ROS_INFO("\033[32m[px4ctrl] AUTO_TAKEOFF --> AUTO_HOVER(L2)\033[32m");
@@ -147,6 +148,7 @@ void PX4CtrlFSM::handleAutoLand(
             if (toggle_arm_disarm(false)) {
                 print_once_flag = true;
                 state           = MANUAL_CTRL;
+                controller.resetControlState(odom_data);
                 toggle_offboard_mode(false);
 
                 ROS_INFO("\033[32m[px4ctrl] AUTO_LAND --> MANUAL_CTRL(L1)\033[32m");
@@ -355,6 +357,7 @@ bool PX4CtrlFSM::tryFallbackCmdToHover(const ros::Time &now_time, Desired_State_
     }
 
     state = AUTO_HOVER;
+    controller.resetControlState(odom_data);
     set_hov_with_odom();
     des = get_hover_des();
 
@@ -386,11 +389,13 @@ bool PX4CtrlFSM::enterManualFromOffboard() {
     }
 
     state = MANUAL_CTRL;
+    controller.resetControlState(odom_data);
     return true;
 }
 
 bool PX4CtrlFSM::enterAutoHover() {
     reset_thrust_mapping();
+    controller.resetControlState(odom_data);
     set_hov_with_odom();
 
     if (!toggle_offboard_mode(true)) {
@@ -405,6 +410,7 @@ bool PX4CtrlFSM::enterAutoHover() {
 
 bool PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
     reset_thrust_mapping();
+    controller.resetControlState(odom_data);
     set_start_pose_for_takeoff_land(odom_data);
 
     if (state_data.current_state.mode != "OFFBOARD") {
@@ -430,6 +436,7 @@ bool PX4CtrlFSM::enterAutoTakeoff(const ros::Time &now_time) {
 }
 
 void PX4CtrlFSM::enterCmdCtrl(Desired_State_t &des) {
+    controller.resetControlState(odom_data);
     state = CMD_CTRL;
     des   = get_cmd_des();
 
@@ -437,6 +444,7 @@ void PX4CtrlFSM::enterCmdCtrl(Desired_State_t &des) {
 }
 
 void PX4CtrlFSM::enterAutoLand() {
+    controller.resetControlState(odom_data);
     state = AUTO_LAND;
     set_start_pose_for_takeoff_land(odom_data);
 
@@ -495,6 +503,18 @@ void PX4CtrlFSM::process() {
         debug_msg              = controller.calculateControl(des, odom_data, imu_data, u);
         debug_msg.header.stamp = now_time;
         debug_pub.publish(debug_msg);
+        if (param.tuning_debug.enable) {
+            tune_debug_msg                  = controller.getTuneDebug();
+            tune_debug_msg.header.stamp     = now_time;
+            tune_debug_msg.header.frame_id  = odom_data.msg.header.frame_id;
+            tune_debug_msg.fsm_state        = static_cast<uint8_t>(state);
+            const Eigen::Vector3d &specific_force_filtered =
+                flag_init_imu_acc_lpf ? imu_acc_lpf : imu_data.a;
+            tune_debug_msg.specific_force_body_filtered.x = specific_force_filtered.x();
+            tune_debug_msg.specific_force_body_filtered.y = specific_force_filtered.y();
+            tune_debug_msg.specific_force_body_filtered.z = specific_force_filtered.z();
+            tune_debug_pub.publish(tune_debug_msg);
+        }
     }
 
     // STEP4: publish control commands to mavros

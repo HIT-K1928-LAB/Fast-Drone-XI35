@@ -121,6 +121,8 @@ RUN apt-get update && \
         ros-${ROS_VERSION}-image-transport-plugins \
         ros-${ROS_VERSION}-mavros \
         ros-${ROS_VERSION}-message-filters \
+        ros-${ROS_VERSION}-dynamic-reconfigure \
+        ros-${ROS_VERSION}-rqt-reconfigure \
         ros-${ROS_VERSION}-nav-msgs \
         ros-${ROS_VERSION}-pcl-ros \
         ros-${ROS_VERSION}-roslint \

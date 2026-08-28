@@ -41,6 +41,7 @@ add_message_files(
   SwarmOdometry.msg
   SwarmInfo.msg
   Px4ctrlDebug.msg
+  Px4ctrlTuneDebug.msg
   TakeoffLand.msg
 )
 

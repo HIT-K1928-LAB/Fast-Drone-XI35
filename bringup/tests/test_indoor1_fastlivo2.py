@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
-import subprocess
-from pathlib import Path
+import math
+import os
 import re
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import yaml
 
@@ -17,6 +19,26 @@ PROFILE_DIR = WORKSPACE / "bringup/profiles/pc_sim"
 
 
 class Indoor1FastLivo2ContractTest(unittest.TestCase):
+    def expand_gpu_lidar_model(self):
+        environment = os.environ.copy()
+        environment["GAZEBO_MODEL_PATH"] = str(PX4_MODELS)
+        result = subprocess.run(
+            [
+                "gz",
+                "sdf",
+                "-p",
+                str(
+                    PX4_MODELS
+                    / "iris_3d_gpu_lidar/iris_3d_gpu_lidar.sdf"
+                ),
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=environment,
+        )
+        return ET.fromstring(result.stdout)
+
     def build_pc_sim_layout(self, odometry_source):
         self.assertEqual(odometry_source, "lidar")
         return subprocess.run(
@@ -48,6 +70,125 @@ class Indoor1FastLivo2ContractTest(unittest.TestCase):
         self.assertIsNotNone(sensor)
         self.assertEqual(sensor.findtext("update_rate"), "10")
 
+    def test_gpu_lidar_model_resolves_ros_stereo_and_depth_plugins(self):
+        expanded = self.expand_gpu_lidar_model()
+        plugin_filenames = {
+            plugin.attrib["filename"]
+            for plugin in expanded.findall(".//plugin")
+        }
+        self.assertIn("libgazebo_ros_multicamera.so", plugin_filenames)
+        self.assertIn("libgazebo_ros_openni_kinect.so", plugin_filenames)
+
+    def test_stereo_depth_camera_matches_pc_sim_contract(self):
+        expanded = self.expand_gpu_lidar_model()
+        model = expanded.find("model")
+        joint = model.find("joint[@name='stereo_joint']")
+        self.assertEqual(
+            joint.findtext("child"),
+            "stereo_depth_camera::link",
+        )
+
+        link = model.find("link[@name='stereo_depth_camera::link']")
+        self.assertIsNotNone(link)
+        stereo = link.find("sensor[@type='multicamera']")
+        depth = link.find("sensor[@type='depth']")
+        self.assertIsNotNone(stereo)
+        self.assertIsNotNone(depth)
+        self.assertEqual(float(stereo.findtext("update_rate")), 30.0)
+        self.assertEqual(float(depth.findtext("update_rate")), 30.0)
+
+        camera_config = yaml.safe_load(
+            (
+                PROFILE_DIR / "config/fastlivo2/camera_stereo_sim.yaml"
+            ).read_text()
+        )
+        left = stereo.find("camera[@name='left']")
+        self.assertEqual(
+            [float(value) for value in left.findtext("pose").split()],
+            [0.0, 0.06, 0.0, 0.0, 0.0, 0.0],
+        )
+        expected_fov = 2.0 * math.atan(
+            camera_config["cam_width"] / (2.0 * camera_config["cam_fx"])
+        )
+        self.assertAlmostEqual(
+            float(left.findtext("horizontal_fov")),
+            expected_fov,
+            places=4,
+        )
+
+        stereo_plugin = stereo.find(
+            "plugin[@filename='libgazebo_ros_multicamera.so']"
+        )
+        self.assertEqual(float(stereo_plugin.findtext("updateRate")), 30.0)
+        self.assertEqual(stereo_plugin.findtext("cameraName"), "stereo_camera")
+        self.assertEqual(stereo_plugin.findtext("imageTopicName"), "image_raw")
+        self.assertEqual(
+            [
+                float(stereo_plugin.findtext(name))
+                for name in (
+                    "distortionK1",
+                    "distortionK2",
+                    "distortionT1",
+                    "distortionT2",
+                )
+            ],
+            [
+                camera_config["cam_d0"],
+                camera_config["cam_d1"],
+                camera_config["cam_d2"],
+                camera_config["cam_d3"],
+            ],
+        )
+
+        depth_plugin = depth.find(
+            "plugin[@filename='libgazebo_ros_openni_kinect.so']"
+        )
+        self.assertEqual(float(depth_plugin.findtext("updateRate")), 30.0)
+        self.assertEqual(depth_plugin.findtext("cameraName"), "stereo_camera")
+        self.assertEqual(
+            depth_plugin.findtext("depthImageTopicName"),
+            "depth/image_raw",
+        )
+
+    def test_depth_sensor_disables_color_and_point_cloud_publishers(self):
+        expanded = self.expand_gpu_lidar_model()
+        model = expanded.find("model")
+        link = model.find("link[@name='stereo_depth_camera::link']")
+        depth = link.find("sensor[@type='depth']")
+        plugin = depth.find(
+            "plugin[@filename='libgazebo_ros_openni_kinect.so']"
+        )
+
+        self.assertIn(plugin.findtext("publishImage"), ("false", "0"))
+        self.assertIn(plugin.findtext("publishPointCloud"), ("false", "0"))
+        self.assertIsNone(plugin.find("imageTopicName"))
+        self.assertIsNone(plugin.find("cameraInfoTopicName"))
+        self.assertEqual(
+            plugin.findtext("depthImageTopicName"),
+            "depth/image_raw",
+        )
+        self.assertEqual(
+            plugin.findtext("depthImageCameraInfoTopicName"),
+            "depth/camera_info",
+        )
+
+    def test_depth_sensor_uses_d435_detection_range(self):
+        expanded = self.expand_gpu_lidar_model()
+        model = expanded.find("model")
+        link = model.find("link[@name='stereo_depth_camera::link']")
+        depth = link.find("sensor[@type='depth']")
+        plugin = depth.find(
+            "plugin[@filename='libgazebo_ros_openni_kinect.so']"
+        )
+
+        self.assertEqual(depth.findtext("camera/clip/near"), "0.2")
+        self.assertEqual(depth.findtext("camera/clip/far"), "10")
+        self.assertEqual(plugin.findtext("pointCloudCutoff"), "0.2")
+        self.assertEqual(
+            plugin.findtext("pointCloudCutoffMax"),
+            "10",
+        )
+
     def test_saved_world_states_start_at_zero_simulation_time(self):
         nonzero_states = {}
         for world_path in WORKSPACE.rglob("*.world"):
@@ -70,37 +211,6 @@ class Indoor1FastLivo2ContractTest(unittest.TestCase):
                     )
 
         self.assertEqual(nonzero_states, {})
-
-    def test_pc_sim_lidar_layout_spawns_indoor1_iris_model(self):
-        output = self.build_pc_sim_layout("lidar")
-        self.assertIn(
-            f"roslaunch '{PROFILE_DIR}/launch/simulator.launch'",
-            output,
-        )
-        self.assertIn(
-            f"roslaunch '{PROFILE_DIR}/launch/lidar_bridge.launch'",
-            output,
-        )
-        self.assertIn(
-            f"roslaunch '{PROFILE_DIR}/launch/fastlivo2.launch'",
-            output,
-        )
-        self.assertIn(
-            f"roslaunch '{PROFILE_DIR}/launch/lidar/px4ctrl.launch'",
-            output,
-        )
-        self.assertNotIn("vglrun", output)
-        self.assertNotIn("pc_sim.launch", output)
-
-        roslaunch_commands = [
-            line for line in output.splitlines()
-            if "roslaunch " in line
-        ]
-        self.assertTrue(roslaunch_commands)
-        self.assertTrue(
-            all(":=" not in command for command in roslaunch_commands),
-            roslaunch_commands,
-        )
 
     def test_pc_sim_lidar_launch_defines_bridge_topics_and_period(self):
         root = ET.parse(

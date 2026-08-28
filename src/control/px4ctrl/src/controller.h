@@ -9,6 +9,7 @@
 #include <Eigen/Dense>
 #include <mavros_msgs/AttitudeTarget.h>
 #include <quadrotor_msgs/Px4ctrlDebug.h>
+#include <quadrotor_msgs/Px4ctrlTuneDebug.h>
 #include <queue>
 
 struct Desired_State_t {
@@ -53,6 +54,10 @@ class LinearControl {
         const Desired_State_t &des, const Odom_Data_t &odom, const Imu_Data_t &imu,
         Controller_Output_t &u);
 
+    void resetControlState(const Odom_Data_t &odom);
+
+    const quadrotor_msgs::Px4ctrlTuneDebug &getTuneDebug() const { return tune_debug_msg_; }
+
     bool estimateThrustModel(const Eigen::Vector3d &est_v, const Parameter_t &param);
     bool estimateThrustModelUsingVelFB(const Eigen::Vector3d &est_v, const Parameter_t &param);
     bool estimateThrustModel(
@@ -64,8 +69,9 @@ class LinearControl {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   private:
-    Parameter_t param_;
+    Parameter_t &param_;
     quadrotor_msgs::Px4ctrlDebug debug_msg_;
+    quadrotor_msgs::Px4ctrlTuneDebug tune_debug_msg_;
     std::queue<std::pair<ros::Time, double>> timed_thrust_;
     std::queue<Eigen::Vector3d> timed_vel_;
     static constexpr double kMinNormalizedCollectiveThrust_ = 3.0;
@@ -76,9 +82,19 @@ class LinearControl {
     double alpha_ = 1.0;
     double P_;
 
+    bool control_state_initialized_{false};
+    Eigen::Vector3d v_filt_{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d e_v_int_{Eigen::Vector3d::Zero()};
+    ros::Time last_ctrl_time_;
+    ros::Time last_odom_stamp_;
+    bool last_output_saturated_{false};
+    bool first_control_after_reset_{true};
+
     double computeDesiredCollectiveThrustSignal(const Eigen::Vector3d &des_acc);
     double fromQuaternion2yaw(Eigen::Quaterniond q);
     double volt2HoverPerOverM0(double volt);
+    ros::Time odomSampleStamp(const Odom_Data_t &odom) const;
+    void updateVelocityFilter(const Odom_Data_t &odom);
 };
 
 #endif

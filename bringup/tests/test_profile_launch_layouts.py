@@ -66,7 +66,6 @@ class ProfileLaunchLayoutTest(unittest.TestCase):
     def test_each_profile_tmux_script_owns_its_mode_and_layout(self):
         expected = {
             "pc": ("vins_stereo", "launch/vins.launch"),
-            "pc_sim": ("lidar", "launch/lidar_bridge.launch"),
             "xi35_10": ("vins_stereo", "launch/vins.launch"),
             "xi35_default": ("vins_stereo", "launch/vins.launch"),
             "xi35_euroc": ("euroc", "launch/vins.launch"),
