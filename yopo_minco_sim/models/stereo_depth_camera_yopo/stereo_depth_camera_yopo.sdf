@@ -1,0 +1,123 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.5">
+  <model name="stereo_depth_camera_yopo">
+    <link name="link">
+      <inertial>
+        <pose>0.01 0.025 0.025 0 0 0</pose>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>4.15e-6</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>2.407e-6</iyy>
+          <iyz>0</iyz>
+          <izz>2.407e-6</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <pose>0 0 0 0 1.57 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://depth_camera/meshes/hokuyo.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <sensor type="multicamera" name="stereo_camera">
+        <update_rate>30.0</update_rate>
+        <camera name="left">
+          <pose>0 0.06 0 0 0 0</pose>
+          <horizontal_fov>1.5708</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>300</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+        <camera name="right">
+          <pose>0 -0.06 0 0 0 0</pose>
+          <horizontal_fov>1.5708</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>300</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+        <plugin name="stereo_camera_controller" filename="libgazebo_ros_multicamera.so">
+          <robotNamespace />
+          <alwaysOn>true</alwaysOn>
+          <updateRate>30.0</updateRate>
+          <cameraName>stereo_camera</cameraName>
+          <imageTopicName>image_raw</imageTopicName>
+          <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+          <frameName>camera_link</frameName>
+          <hackBaseline>0.12</hackBaseline>
+          <Fx>320.0</Fx>
+          <Fy>320.0</Fy>
+          <Cx>320.0</Cx>
+          <Cy>240.0</Cy>
+          <distortionK1>-0.1</distortionK1>
+          <distortionK2>0.01</distortionK2>
+          <distortionK3>0.0</distortionK3>
+          <distortionT1>5e-5</distortionT1>
+          <distortionT2>-1e-4</distortionT2>
+        </plugin>
+      </sensor>
+
+      <sensor type="depth" name="depth_camera">
+        <always_on>true</always_on>
+        <update_rate>30.0</update_rate>
+        <visualize>false</visualize>
+        <camera name="depth">
+          <pose>0 0 0 0 0 0</pose>
+          <horizontal_fov>1.5707963267948966</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>370</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.2</near>
+            <far>20</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+        <plugin name="depth_camera_controller" filename="libgazebo_ros_openni_kinect.so">
+          <robotNamespace />
+          <alwaysOn>true</alwaysOn>
+          <updateRate>30.0</updateRate>
+          <cameraName>stereo_camera</cameraName>
+          <publishImage>false</publishImage>
+          <publishPointCloud>false</publishPointCloud>
+          <depthImageTopicName>depth/image_raw</depthImageTopicName>
+          <depthImageCameraInfoTopicName>depth/camera_info</depthImageCameraInfoTopicName>
+          <frameName>camera_link</frameName>
+          
+          <pointCloudCutoff>0.2</pointCloudCutoff>
+          <pointCloudCutoffMax>20</pointCloudCutoffMax>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

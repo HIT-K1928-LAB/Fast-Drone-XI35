@@ -22,3 +22,7 @@
 	path = third_party/px4_autopilot
 	url = git@github.com:PX4/PX4-Autopilot.git
 	branch = main
+[submodule "third_party/YOPO"]
+	path = third_party/YOPO
+	url = git@github.com:TJU-Aerial-Robotics/YOPO.git
+	branch = YOPO-MINCO

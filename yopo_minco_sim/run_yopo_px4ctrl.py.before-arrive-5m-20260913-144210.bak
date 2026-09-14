@@ -1,0 +1,198 @@
+"""Gazebo SITL adapter. Idle until a goal; --execute enables PX4Ctrl output."""
+import os
+for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ[key] = "1"
+
+import argparse
+import sys
+import time
+import threading
+from pathlib import Path
+
+workspace = Path(os.environ.get("FD_WS", "/root/Fast-Drone-XI35/Fast-Drone-XI35"))
+yopo_dir = workspace / "third_party/YOPO/YOPO"
+sys.path.insert(0, str(yopo_dir))
+
+import numpy as np
+import rospy
+from scipy.spatial.transform import Rotation
+from mavros_msgs.msg import State
+from std_msgs.msg import Empty
+from quadrotor_msgs.msg import PositionCommand
+import test_yopo_ros as upstream
+from config.config import cfg
+
+# Both Publisher construction and message creation in upstream use this symbol.
+upstream.PositionCommand = PositionCommand
+
+
+class CheckedPublisher:
+    def __init__(self, owner, publisher):
+        self.owner, self.publisher = owner, publisher
+
+    def publish(self, msg):
+        values = [getattr(v, k) for v in (msg.position, msg.velocity, msg.acceleration)
+                  for k in ("x", "y", "z")] + [msg.yaw, msg.yaw_dot]
+        if not np.isfinite(values).all() or msg.trajectory_flag != msg.TRAJECTORY_STATUS_READY:
+            self.owner.stop("invalid or non-READY command")
+            return
+        pos = np.array([msg.position.x, msg.position.y, msg.position.z])
+        if np.linalg.norm(pos - self.owner._odom_pos()) > 1.0:
+            self.owner.stop("reference tracking error exceeds 1 m")
+            return
+        msg.header.frame_id = "world"
+        self.publisher.publish(msg)
+
+
+class GazeboYopo(upstream.YopoNet):
+    def __init__(self, execute):
+        self.guard = threading.RLock()
+        self.active = False
+        self.execute = execute
+        self.fcu = State()
+        self.state_received = self.odom_received = self.depth_received = -float("inf")
+        self.latest_depth_stamp = None
+        self.latest_depth_shape = None
+        rospy.init_node("yopo_net", anonymous=False)
+        self.state_sub = rospy.Subscriber("/iris_0/mavros/state", State, self.receive_state, queue_size=1)
+        self.stop_sub = rospy.Subscriber("/yopo_minco/stop", Empty, self.receive_stop, queue_size=1)
+        output = "/position_cmd" if execute else "/yopo_debug/position_cmd"
+        rospy.logwarn("SITL adapter: output=%s. WAITING FOR GOAL; no automatic movement.", output)
+        settings = dict(use_tensorrt=False, goal=[0, 0, 1.2], topk=1,
+                        pitch_angle_deg=0, odom_topic="/gazebo/iris_0/odometry",
+                        depth_topic="/iris_0/stereo_camera/depth/image_raw",
+                        ctrl_topic=output, plan_from_reference=True, verbose=False)
+        super().__init__(settings, str(yopo_dir / "saved/YOPO_1/epoch50.pth"))
+
+    def receive_state(self, msg):
+        # Do not wait behind GPU work merely to cache flight state.
+        self.fcu = msg
+        self.state_received = time.monotonic()
+
+    def stop(self, reason):
+        if self.active:
+            rospy.logwarn("YOPO STOP: %s. Command publishing stopped; wait for PX4Ctrl AUTO_HOVER.", reason)
+        self.active = False
+        self.desire_init = False
+        self.ctrl_time = None
+
+    def receive_stop(self, _msg):
+        with self.guard:
+            self.stop("user request")
+
+    def input_problem(self):
+        now = time.monotonic()
+        if now - self.odom_received > 0.5 or now - self.depth_received > 0.5:
+            return "odometry/depth missing or stale"
+        if self.latest_depth_shape != (640, 370):
+            return "expected calibrated depth size 640x370"
+        if self.odom.header.frame_id != "world":
+            return "odometry must be in world"
+        for stamp in (self.odom.header.stamp, self.latest_depth_stamp):
+            age = (rospy.Time.now() - stamp).to_sec()
+            if age < -0.05 or age > 0.5:
+                return "sensor timestamp out of range"
+        if self.execute and (now - self.state_received > 3.0 or not self.fcu.connected
+                             or not self.fcu.armed or self.fcu.mode != "OFFBOARD"):
+            return "PX4 must be connected, armed and OFFBOARD"
+        return None
+
+    def seed_reference(self):
+        self.desire_pos = self._odom_pos()
+        self.desire_vel = self._odom_vel()
+        self.desire_acc = np.zeros(3)
+        q = self.odom.pose.pose.orientation
+        self.last_yaw = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler("ZYX")[0]
+        self.last_control_msg = None
+        self.ctrl_time = None
+        self.brake = self.arrive = False
+        self.desire_init = True
+
+    def callback_odometry(self, msg):
+        with self.guard:
+            self.odom, self.odom_init = msg, True
+            self.odom_received = time.monotonic()
+            if not self.active:
+                self.desire_init = False
+                return
+            if np.linalg.norm(self._odom_pos() - self.goal) < 0.3 and np.linalg.norm(self._odom_vel()) < 0.2:
+                self.stop("arrived within 0.3 m with low velocity")
+
+    def callback_set_goal(self, msg):
+        with self.guard:
+            if self.active:
+                rospy.logwarn("Stop the current test before sending a new goal.")
+                return
+            problem = self.input_problem()
+            if problem:
+                rospy.logwarn("Goal rejected: %s", problem)
+                return
+            if msg.header.frame_id not in ("world", "yopo_preview"):
+                rospy.logwarn("Goal frame must be world or the identity frame yopo_preview.")
+                return
+            p = self._odom_pos()
+            if p[2] < 0.6 or np.linalg.norm(self._odom_vel()) > 0.15:
+                rospy.logwarn("Goal rejected: first establish a stable hover above 0.6 m.")
+                return
+            # Initial tests remain at the current altitude, including RViz 2D goals.
+            goal = np.array([msg.pose.position.x, msg.pose.position.y, p[2]])
+            distance = np.linalg.norm(goal - p)
+            if not np.isfinite(goal).all() or not 0.5 <= distance <= 3.0:
+                rospy.logwarn("Goal rejected: choose a horizontal target 0.5 to 3 m away.")
+                return
+            self.goal = goal
+            self.seed_reference()
+            self.active = True
+            rospy.logwarn("GOAL ACCEPTED: %s; output=%s", goal.tolist(),
+                          "/position_cmd" if self.execute else "/yopo_debug/position_cmd")
+
+    def callback_depth(self, msg):
+        with self.guard:
+            self.depth_received = time.monotonic()
+            self.latest_depth_stamp = msg.header.stamp
+            self.latest_depth_shape = (msg.width, msg.height)
+            if not self.active:
+                return
+            problem = self.input_problem()
+            if problem:
+                self.stop(problem)
+                return
+            try:
+                super().callback_depth(msg)
+                if self.brake:
+                    self.stop("upstream corridor admission requested braking")
+            except Exception:
+                self.stop("depth/planning exception")
+                rospy.logerr("Planning failed", exc_info=True)
+
+    def control_pub(self, event):
+        with self.guard:
+            if not self.active:
+                return
+            problem = self.input_problem()
+            if problem:
+                self.stop(problem)
+                return
+            if self.ctrl_time is None:
+                return  # Wait for a newly solved trajectory after each goal.
+            if self.ctrl_time + self.ctrl_dt > getattr(self, "best_total_time", self.traj_time):
+                self.stop("trajectory expired")
+                return
+            if self.brake or self.arrive:
+                self.stop("planner stop condition")
+                return
+            if not isinstance(self.ctrl_pub, CheckedPublisher):
+                self.ctrl_pub = CheckedPublisher(self, self.ctrl_pub)
+            try:
+                super().control_pub(event)
+            except Exception:
+                self.stop("control sampling exception")
+                rospy.logerr("Control sampling failed", exc_info=True)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--execute", action="store_true", help="Enable /position_cmd only after a goal")
+    args = parser.parse_args(rospy.myargv()[1:])
+    cfg["velocity"] = 1.0
+    GazeboYopo(args.execute)
