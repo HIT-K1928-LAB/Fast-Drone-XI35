@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="test_wall">
+    <static>true</static>
+    <link name="wall_link">
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.5 3.0 8.0</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.5 3.0 8.0</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.2 0.1 1</ambient>
+          <diffuse>0.8 0.2 0.1 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

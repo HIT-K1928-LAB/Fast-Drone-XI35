@@ -46,11 +46,11 @@ class CheckedPublisher:
 
 class GazeboYopo(upstream.YopoNet):
     def __init__(self, execute):
-        self.guard = threading.RLock()
+        self.guard = threading.RLock()#locked， avoid modifying same variables simultaneously .
         self.active = False
         self.execute = execute
         self.fcu = State()
-        self.state_received = self.odom_received = self.depth_received = -float("inf")
+        self.state_received = self.odom_received = self.depth_received = -float("inf")#ensure odometry not received when start
         self.latest_depth_stamp = None
         self.latest_depth_shape = None
         rospy.init_node("yopo_net", anonymous=False)
@@ -69,18 +69,18 @@ class GazeboYopo(upstream.YopoNet):
         self.fcu = msg
         self.state_received = time.monotonic()
 
-    def stop(self, reason):
+    def stop(self, reason):#stop publishing yopo position_command,not the power of drone  
         if self.active:
             rospy.logwarn("YOPO STOP: %s. Command publishing stopped; wait for PX4Ctrl AUTO_HOVER.", reason)
-        self.active = False
-        self.desire_init = False
-        self.ctrl_time = None
+        self.active = False#YOPO task deactive
+        self.desire_init = False#abolish the velocity,acceleration and position of this trajectory
+        self.ctrl_time = None#clear the ctrl_time being recorded.
 
-    def receive_stop(self, _msg):
+    def receive_stop(self, _msg):#/yopo_minco/stop收到stop消息，调用stop函数并打印原因
         with self.guard:
             self.stop("user request")
 
-    def input_problem(self):
+    def input_problem(self):#检查问题
         now = time.monotonic()
         if now - self.odom_received > 0.5 or now - self.depth_received > 0.5:
             return "odometry/depth missing or stale"
@@ -97,7 +97,7 @@ class GazeboYopo(upstream.YopoNet):
             return "PX4 must be connected, armed and OFFBOARD"
         return None
 
-    def seed_reference(self):
+    def seed_reference(self):#给新一轮规划准备起点。
         self.desire_pos = self._odom_pos()
         self.desire_vel = self._odom_vel()
         self.desire_acc = np.zeros(3)
@@ -108,17 +108,17 @@ class GazeboYopo(upstream.YopoNet):
         self.brake = self.arrive = False
         self.desire_init = True
 
-    def callback_odometry(self, msg):
+    def callback_odometry(self, msg):#收到里程计的调用后：保存；判断是否有任务；是否到达
         with self.guard:
             self.odom, self.odom_init = msg, True
             self.odom_received = time.monotonic()
             if not self.active:
                 self.desire_init = False
                 return
-            if np.linalg.norm(self._odom_pos() - self.goal) < 5.0:
-                self.stop("arrived within 5.0 m")
+            if np.linalg.norm(self._odom_pos() - self.goal) < 3.0:
+                self.stop("arrived within 5.0 m") 
 
-    def callback_set_goal(self, msg):
+    def callback_set_goal(self, msg):#收到目标进行安全检查，通过则启动YOPO任务
         with self.guard:
             if self.active:
                 rospy.logwarn("Stop the current test before sending a new goal.")
@@ -135,9 +135,9 @@ class GazeboYopo(upstream.YopoNet):
                 rospy.logwarn("Goal rejected: first establish a stable hover above 0.6 m.")
                 return
             # Initial tests remain at the current altitude, including RViz 2D goals.
-            goal = np.array([msg.pose.position.x, msg.pose.position.y, p[2]])
+            goal = np.array([msg.pose.position.x, msg.pose.position.y, p[2]])#用真实位置P[2]防止改变高度
             distance = np.linalg.norm(goal - p)
-            if not np.isfinite(goal).all() or not 0.5 <= distance <= 15.0:
+            if not np.isfinite(goal).all() or not 0.5 <= distance <=40.0:
                 rospy.logwarn("Goal rejected: choose a horizontal target 0.5 to 15 m away.")
                 return
             self.goal = goal
@@ -146,7 +146,7 @@ class GazeboYopo(upstream.YopoNet):
             rospy.logwarn("GOAL ACCEPTED: %s; output=%s", goal.tolist(),
                           "/position_cmd" if self.execute else "/yopo_debug/position_cmd")
 
-    def callback_depth(self, msg):
+    def callback_depth(self, msg):#收到深度图消息后，加锁记录时间戳和尺寸,并交给父类规划
         with self.guard:
             self.depth_received = time.monotonic()
             self.latest_depth_stamp = msg.header.stamp
@@ -165,7 +165,7 @@ class GazeboYopo(upstream.YopoNet):
                 self.stop("depth/planning exception")
                 rospy.logerr("Planning failed", exc_info=True)
 
-    def control_pub(self, event):
+    def control_pub(self, event):#周期性地从当前轨迹上取出一个控制点，并发布成 PositionCommand。
         with self.guard:
             if not self.active:
                 return
