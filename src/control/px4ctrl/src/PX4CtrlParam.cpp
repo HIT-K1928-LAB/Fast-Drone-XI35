@@ -33,7 +33,10 @@ void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
     read_essential_param(nh, "use_bodyrate_ctrl", use_bodyrate_ctrl);
     read_essential_param(nh, "max_manual_vel", max_manual_vel);
     read_essential_param(nh, "max_angle", max_angle);
-    read_essential_param(nh, "low_voltage", low_voltage);
+    read_essential_param(nh, "battery_failsafe/enable", battery_failsafe.enable);
+    read_essential_param(nh, "battery_failsafe/cell_count", battery_failsafe.cell_count);
+    read_essential_param(nh, "battery_failsafe/critical_cell_voltage", battery_failsafe.critical_cell_voltage);
+    read_essential_param(nh, "battery_failsafe/trigger_hold_time", battery_failsafe.trigger_hold_time);
 
     read_essential_param(nh, "rc_reverse/roll", rc_reverse.roll);
     read_essential_param(nh, "rc_reverse/pitch", rc_reverse.pitch);
@@ -82,6 +85,19 @@ void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
     nh.param("control_limits/min_thrust", control_limits.min_thrust, 0.15);
     nh.param("control_limits/max_thrust", control_limits.max_thrust, 0.90);
 
+    if (battery_failsafe.cell_count < 1 || battery_failsafe.cell_count > 12) {
+        ROS_WARN("[px4ctrl] battery_failsafe/cell_count must be in [1, 12]; using 4.");
+        battery_failsafe.cell_count = 4;
+    }
+    if (battery_failsafe.critical_cell_voltage <= 0.0) {
+        ROS_WARN("[px4ctrl] battery_failsafe/critical_cell_voltage must be positive; disabling battery failsafe.");
+        battery_failsafe.enable = false;
+    }
+    if (battery_failsafe.trigger_hold_time < 0.0) {
+        ROS_WARN("[px4ctrl] battery_failsafe/trigger_hold_time must be non-negative; using 0.0 s.");
+        battery_failsafe.trigger_hold_time = 0.0;
+    }
+
     if (velocity_filter.cutoff_frequency <= 0.0) {
         ROS_WARN("[px4ctrl] Non-positive velocity filter cutoff; disabling velocity filter.");
         velocity_filter.enable = false;
@@ -121,6 +137,11 @@ void Parameter_t::config_from_ros_handle(const ros::NodeHandle &nh) {
         ROS_ERROR(
             "\"no_RC\" is only allowd with both \"auto_takeoff_land\" and \"enable_auto_arm\" "
             "enabled.");
+    }
+
+    if (battery_failsafe.enable && !thr_map.use_battery_feedback) {
+        ROS_ERROR("[px4ctrl] Battery failsafe requires thrust_model/use_battery_feedback=true; disabling battery failsafe.");
+        battery_failsafe.enable = false;
     }
 
     if (thr_map.print_val) {
