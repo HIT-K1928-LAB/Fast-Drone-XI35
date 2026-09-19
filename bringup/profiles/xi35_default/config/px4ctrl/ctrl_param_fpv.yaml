@@ -9,7 +9,11 @@ ctrl_freq_max   : 200.0
 use_bodyrate_ctrl: false
 max_manual_vel: 2.0
 max_angle: 30  # Attitude angle limit in degree. A negative value means no limit.
-low_voltage: 13.6 # 4S battery
+battery_failsafe:
+    enable: true
+    cell_count: 4 # Set to 6 when using a 6S battery.
+    critical_cell_voltage: 3.4 # Average cell voltage threshold (V).
+    trigger_hold_time: 2.0 # Voltage must remain below threshold for this long (s).
 
 rc_reverse:
     roll: true

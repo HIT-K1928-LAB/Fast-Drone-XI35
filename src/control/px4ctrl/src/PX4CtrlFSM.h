@@ -100,7 +100,10 @@ class PX4CtrlFSM {
   private:
     // refactor begin
     State_t state;  // Should only be changed in PX4CtrlFSM::process() function!
-    TakeoffLandContext takeoff_land_ctx;  // FSM 内部自动起降上下文
+    TakeoffLandContext takeoff_land_ctx;  // FSM internal auto takeoff/land context
+    bool low_battery_latched{false};
+    ros::Time low_battery_since;
+    bool px4_auto_land_active{false};
 
     // ---- state handlers ----
     void handleManualCtrl(const ros::Time &now_time, Desired_State_t &des);
@@ -113,6 +116,7 @@ class PX4CtrlFSM {
     // ---- event predicates ----
     bool takeoffRequested() const;
     bool landRequested() const;
+    bool batteryLandingRequired(const ros::Time &now_time);
     bool hoverSwitchTriggered() const;
     bool commandSwitchEnabled() const;
     bool commandSwitchTriggered() const;
@@ -140,6 +144,7 @@ class PX4CtrlFSM {
     bool enterAutoTakeoff(const ros::Time &now_time);
     void enterCmdCtrl(Desired_State_t &des);
     void enterAutoLand();
+    bool requestPx4AutoLand();
 
     // refactor end
 

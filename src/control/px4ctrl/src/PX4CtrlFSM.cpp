@@ -53,11 +53,11 @@ void PX4CtrlFSM::handleManualCtrl(const ros::Time &now_time, Desired_State_t &de
 }
 
 void PX4CtrlFSM::handleAutoHover(const ros::Time &now_time, Desired_State_t &des) {
+    if (tryEnterAutoLand(now_time)) return;
     if (tryFallbackToManual(now_time)) return;
     if (canAutoTakeoffFromHover()) {
         if (tryEnterAutoTakeoff(now_time)) return;
     }
-    if (tryEnterAutoLand(now_time)) return;
     if (tryEnterCmdCtrl(now_time, des)) return;
 
     set_hov_with_rc();
@@ -81,6 +81,7 @@ void PX4CtrlFSM::handleAutoHover(const ros::Time &now_time, Desired_State_t &des
 }
 
 void PX4CtrlFSM::handleCmdCtrl(const ros::Time &now_time, Desired_State_t &des) {
+    if (tryEnterAutoLand(now_time)) return;
     if (tryFallbackToManual(now_time)) return;
     if (tryFallbackCmdToHover(now_time, des)) return;
 
@@ -96,6 +97,7 @@ void PX4CtrlFSM::handleCmdCtrl(const ros::Time &now_time, Desired_State_t &des) 
 }
 
 void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &des) {
+    if (tryEnterAutoLand(now_time)) return;
     if (tryFallbackToManual(now_time)) return;
 
     if ((now_time - takeoff_land_ctx.command_time).toSec() <
@@ -126,6 +128,18 @@ void PX4CtrlFSM::handleAutoTakeoff(const ros::Time &now_time, Desired_State_t &d
 
 void PX4CtrlFSM::handleAutoLand(
     const ros::Time &now_time, Desired_State_t &des, bool &rotor_low_speed_during_land) {
+    if (px4_auto_land_active) {
+        if (!state_data.current_state.armed ||
+            extended_state_data.current_extended_state.landed_state ==
+                mavros_msgs::ExtendedState::LANDED_STATE_ON_GROUND) {
+            px4_auto_land_active = false;
+            state = MANUAL_CTRL;
+            controller.resetControlState(odom_data);
+            ROS_INFO("[px4ctrl] PX4 AUTO.LAND completed.");
+        }
+        return;
+    }
+
     if (tryFallbackToManual(now_time)) return;
 
     if (!get_landed()) {
@@ -168,6 +182,52 @@ bool PX4CtrlFSM::takeoffRequested() const {
 bool PX4CtrlFSM::landRequested() const {
     return takeoff_land_data.triggered &&
            takeoff_land_data.takeoff_land_cmd == quadrotor_msgs::TakeoffLand::LAND;
+}
+
+bool PX4CtrlFSM::batteryLandingRequired(const ros::Time &now_time) {
+    if (low_battery_latched && !state_data.current_state.armed && get_landed()) {
+        low_battery_latched = false;
+        low_battery_since = ros::Time(0);
+        ROS_INFO("[px4ctrl] Battery failsafe latch cleared after disarm.");
+    }
+
+    if (!param.battery_failsafe.enable || low_battery_latched) {
+        return low_battery_latched;
+    }
+
+    if (!state_data.current_state.armed || get_landed()) {
+        low_battery_since = ros::Time(0);
+        return false;
+    }
+
+    if (!bat_is_received(now_time)) {
+        low_battery_since = ros::Time(0);
+        ROS_WARN_THROTTLE(1.0, "[px4ctrl] Battery failsafe waiting for fresh battery data.");
+        return false;
+    }
+
+    const double cell_voltage = bat_data.volt / static_cast<double>(param.battery_failsafe.cell_count);
+    if (cell_voltage > param.battery_failsafe.critical_cell_voltage) {
+        low_battery_since = ros::Time(0);
+        return false;
+    }
+
+    if (low_battery_since.isZero()) {
+        low_battery_since = now_time;
+        ROS_WARN("[px4ctrl] Low battery detected: pack=%.3f V, cell=%.3f V (%dS), threshold=%.3f V. Holding for %.2f s.",
+                 bat_data.volt, cell_voltage, param.battery_failsafe.cell_count,
+                 param.battery_failsafe.critical_cell_voltage,
+                 param.battery_failsafe.trigger_hold_time);
+    }
+
+    if ((now_time - low_battery_since).toSec() < param.battery_failsafe.trigger_hold_time) {
+        return false;
+    }
+
+    low_battery_latched = true;
+    ROS_ERROR("[px4ctrl] Battery failsafe latched: pack=%.3f V, cell=%.3f V (%dS). Entering AUTO_LAND.",
+              bat_data.volt, cell_voltage, param.battery_failsafe.cell_count);
+    return true;
 }
 
 bool PX4CtrlFSM::hoverSwitchTriggered() const { return rc_data.enter_hover_mode; }
@@ -316,7 +376,16 @@ bool PX4CtrlFSM::tryEnterCmdCtrl(const ros::Time &now_time, Desired_State_t &des
 }
 
 bool PX4CtrlFSM::tryEnterAutoLand(const ros::Time &now_time) {
-    if (!(landRequested() || emergency_hover)) return false;
+    const bool low_battery = batteryLandingRequired(now_time);
+    if (!(landRequested() || emergency_hover || low_battery)) return false;
+
+    if (low_battery) {
+        if (!requestPx4AutoLand()) {
+            ROS_ERROR("[px4ctrl] PX4 AUTO.LAND request failed; falling back to px4ctrl AUTO_LAND.");
+            enterAutoLand();
+        }
+        return true;
+    }
 
     enterAutoLand();
     if (emergency_hover) {
@@ -326,6 +395,7 @@ bool PX4CtrlFSM::tryEnterAutoLand(const ros::Time &now_time) {
 }
 
 bool PX4CtrlFSM::tryFallbackToManual(const ros::Time &now_time) {
+    if (low_battery_latched) return false;
     const bool rc_ok = param.takeoff_land.no_RC || rc_is_received(now_time);
     if (rc_ok && rc_data.is_hover_mode && odom_is_received(now_time) && !kf_fusion_fail) {
         return false;
@@ -443,7 +513,24 @@ void PX4CtrlFSM::enterCmdCtrl(Desired_State_t &des) {
     ROS_INFO("\033[32m[px4ctrl] AUTO_HOVER(L2) --> CMD_CTRL(L3)\033[32m");
 }
 
+bool PX4CtrlFSM::requestPx4AutoLand() {
+    mavros_msgs::SetMode land_set_mode;
+    land_set_mode.request.custom_mode = "AUTO.LAND";
+
+    if (!(set_FCU_mode_srv.call(land_set_mode) && land_set_mode.response.mode_sent)) {
+        ROS_ERROR("[px4ctrl] PX4 rejected AUTO.LAND mode request.");
+        return false;
+    }
+
+    px4_auto_land_active = true;
+    state = AUTO_LAND;
+    controller.resetControlState(odom_data);
+    ROS_WARN("[px4ctrl] Requested PX4 AUTO.LAND due to battery failsafe.");
+    return true;
+}
+
 void PX4CtrlFSM::enterAutoLand() {
+    px4_auto_land_active = false;
     controller.resetControlState(odom_data);
     state = AUTO_LAND;
     set_start_pose_for_takeoff_land(odom_data);
@@ -476,6 +563,14 @@ void PX4CtrlFSM::process() {
             break;
         default:
             break;
+    }
+
+    if (px4_auto_land_active) {
+        rc_data.enter_hover_mode = false;
+        rc_data.enter_command_mode = false;
+        rc_data.toggle_reboot = false;
+        takeoff_land_data.triggered = false;
+        return;
     }
 
     // STEP1.5: low pass filter for imu acc data

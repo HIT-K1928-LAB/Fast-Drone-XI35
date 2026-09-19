@@ -52,6 +52,13 @@ class Parameter_t {
         double speed;
     };
 
+    struct BatteryFailsafe {
+        bool enable{true};
+        int cell_count{4};
+        double critical_cell_voltage{3.4};
+        double trigger_hold_time{2.0};
+    };
+
     struct TuningDebug {
         bool enable{false};
         std::string topic{"/px4ctrl/tune_debug"};
@@ -78,6 +85,7 @@ class Parameter_t {
     RCReverse rc_reverse;
     ThrustMapping thr_map;
     AutoTakeoffLand takeoff_land;
+    BatteryFailsafe battery_failsafe;
     TuningDebug tuning_debug;
     VelocityFilter velocity_filter;
     ControlLimits control_limits;
@@ -88,7 +96,6 @@ class Parameter_t {
     double max_angle;
     double ctrl_freq_max;
     double max_manual_vel;
-    double low_voltage;
 
     bool use_bodyrate_ctrl;
     // bool print_dbg;
