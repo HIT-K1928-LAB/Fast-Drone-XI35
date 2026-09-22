@@ -4,7 +4,7 @@
 #include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
-
+#include <mavros_msgs/OpticalFlowRad.h>
 #include <Eigen/Dense>
 
 #include "kf_nav/commons.h"
@@ -14,6 +14,7 @@ enum class MeasureType : unsigned short {
   kImu,
   kImuBatch,
   kOdometry,
+  kOpticalFlowRad,
   kGps
 };
 template <typename MsgType>
@@ -125,3 +126,31 @@ struct OdomMeas final : MeasureBase {
   OdomMeas() = default;
 };
 POINTER_ALIAS_DEFINE(OdomMeas)
+
+struct TofMeas final : MeasureBase {
+  static std::shared_ptr<TofMeas> createPtr(double timestamp_s,
+                                            const _Float32 &h) {
+    return std::shared_ptr<TofMeas>(new TofMeas(timestamp_s, h));
+  }
+  static std::shared_ptr<TofMeas> createPtr(
+      const mavros_msgs::OpticalFlowRadConstPtr &tof_msg) {
+    std::shared_ptr<TofMeas> tof{nullptr};
+    if (tof_msg != nullptr && tof_msg->distance > 0.19) {
+      _Float32 h_m = static_cast<_Float32>(tof_msg->distance); 
+      tof.reset(
+          new TofMeas(tof_msg->header.stamp.toSec(), h_m));
+
+    } else {
+      tof.reset(new TofMeas());
+      tof->type = MeasureType::kInvalid;
+    }
+    return tof;
+  }
+  _Float32 distance = 0;
+ protected:
+  TofMeas(double t_s, const float &h)
+      : MeasureBase(t_s, MeasureType::kOpticalFlowRad), 
+        distance(h){}
+  TofMeas() = default;
+};
+POINTER_ALIAS_DEFINE(TofMeas);

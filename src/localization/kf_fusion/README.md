@@ -120,7 +120,7 @@ kf-fusion融合外部里程计时，考虑了imu坐标系到里程计机体系�
 2. 依次启动两个里程计后，再启动标定工具：  
    ```plain
    #启动vins
-   bash bringup/scripts/start_vins.sh bringup/profiles/xi35_default/vins/fast_drone_250.yaml
+   sh shfiles/rspx4_xp.sh
    #启动动捕
    roslaunch motion_capture motion_capture.launch
    #启动外参标定工具

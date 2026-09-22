@@ -564,6 +564,12 @@ void PX4CtrlFSM::land_detector(
 
     static ros::Time time_C12_reached;  // time_Constraints12_reached
     static bool is_last_C12_satisfy;
+    if (state != State_t::AUTO_LAND) {
+        is_last_C12_satisfy = false;
+        time_C12_reached    = ros::Time::now();
+        return;
+    }
+
     if (takeoff_land_ctx.landed) {
         time_C12_reached    = ros::Time::now();
         is_last_C12_satisfy = false;

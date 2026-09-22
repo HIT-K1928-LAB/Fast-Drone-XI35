@@ -110,7 +110,7 @@
     <param name="grid_map/use_depth_filter" value="true"/>
     <param name="grid_map/depth_filter_tolerance" value="0.15"/>
     <param name="grid_map/depth_filter_maxdist"   value="5.0"/>
-    <param name="grid_map/depth_filter_mindist"   value="0.2"/>
+    <param name="grid_map/depth_filter_mindist"   value="0.3"/>
     <param name="grid_map/depth_filter_margin"    value="2"/>
     <param name="grid_map/k_depth_scaling_factor" value="1000.0"/>
     <param name="grid_map/skip_pixel" value="2"/>

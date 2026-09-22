@@ -62,6 +62,12 @@ namespace ego_planner
 
     //紧急进入Hover
     Emergency_Hover = nh.advertise<std_msgs::Bool>("/planning/Emergency_hover", 1);
+    {
+      std_msgs::Bool emergency_hover;
+      emergency_hover.data = false;
+      Emergency_Hover.publish(emergency_hover);
+    }
+
 
     takeoff_land_sub = nh.subscribe("/px4ctrl/takeoff_land", 1, &EGOReplanFSM::takeoffLandCallback, this);
 
@@ -463,6 +469,14 @@ namespace ego_planner
     int pre_s = int(exec_state_);
     exec_state_ = new_state;
     cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
+    if (new_state == FSM_EXEC_STATE::EMERGENCY_STOP ||
+        pre_s == int(FSM_EXEC_STATE::EMERGENCY_STOP))
+    {
+      std_msgs::Bool emergency_hover;
+      emergency_hover.data = (exec_state_ == FSM_EXEC_STATE::EMERGENCY_STOP);
+      Emergency_Hover.publish(emergency_hover);
+    }
+
   }
 
   std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> EGOReplanFSM::timesOfConsecutiveStateCalls()

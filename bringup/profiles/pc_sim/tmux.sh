@@ -86,6 +86,7 @@ build_profile_layout() {
 
     # 启动规划算法
     new_window "planner" "roslaunch '$PROFILE_DIR/launch/$PROFILE_MODE/ego_planner.launch'" manual
+    add_pane "simulator" "px4 params" "bash '$BRINGUP_ROOT/scripts/set_px4_sim_params.sh' iris_0 COM_RCL_EXCEPT 4" auto
     add_pane "planner" "search_plan" "roslaunch '$PROFILE_DIR/launch/$PROFILE_MODE/search_plan.launch'" manual
     add_pane "planner" "yopo" "roslaunch '$PROFILE_DIR/launch/$PROFILE_MODE/yopo.launch'" manual
 

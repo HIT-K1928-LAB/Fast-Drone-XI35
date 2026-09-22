@@ -6,6 +6,7 @@
 #include "kf_nav/safe_queue.h"
 #include <condition_variable>
 #include <geometry_msgs/PointStamped.h>
+#include <mavros_msgs/OpticalFlowRad.h>
 #include <mutex>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
@@ -19,11 +20,13 @@ class KfInterface {
         std::string imu_topic;
         std::string odom_topic;
         std::string vins_invalid_topic;
+        std::string tof_topic;
         bool use_motion_capture;
-        bool use_zupt;
+        bool use_tof;
         void loadConfig() {
             imu_topic          = ParamReader::getInstance().getString("imu_topic", "/imu/data");
             use_motion_capture = ParamReader::getInstance().getBool("use_motion_capture", false);
+            use_tof            = ParamReader::getInstance().getBool("use_tof", false);
             vins_invalid_topic = ParamReader::getInstance().getString(
                 "vins_valid_topic", "/vins_invalid_topic/data");
             if (use_motion_capture) {
@@ -32,7 +35,8 @@ class KfInterface {
             } else {
                 odom_topic = ParamReader::getInstance().getString("odom_topic", "/odom/data");
             }
-            use_zupt = ParamReader::getInstance().getBool("use_zupt", false);
+            tof_topic = ParamReader::getInstance().getString(
+                "tof_topic", "/mavros/px4flow/raw/optical_flow_rad");
         }
     };
     KfInterface() {
@@ -50,6 +54,7 @@ class KfInterface {
     void receiveImuTopic(const sensor_msgs::ImuConstPtr& imu_msg);
     void receiveOdomTopic(const nav_msgs::OdometryConstPtr& odom_msg);
     void receiveVinsInvalidTopic(const std_msgs::BoolConstPtr& vins_invalid_msg);
+    void receiveTofTopic(const mavros_msgs::OpticalFlowRadConstPtr& tof_msg);
     void processMeasurements();
     void publishImuOdom(double t);
     void publishObvOdom(const OdomMeasPtr& odom_meas);
@@ -69,6 +74,7 @@ class KfInterface {
     ros::Subscriber sub_imu_;
     ros::Subscriber sub_odom_;
     ros::Subscriber sub_vins_fail_;
+    ros::Subscriber sub_tof_;
     nav_msgs::Path imu_path_, obv_path_;
 
     std::thread thrd_hdl_;

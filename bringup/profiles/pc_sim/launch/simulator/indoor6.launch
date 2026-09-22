@@ -6,7 +6,7 @@
     <arg name="est" default="ekf2"/>
     <arg name="world" default="$(find mavlink_sitl_gazebo)/worlds/indoor6.world"/>
     <!-- gazebo configs -->
-    <arg name="gui" default="true"/>
+    <arg name="gui" default="false"/>
     <arg name="debug" default="false"/>
     <arg name="verbose" default="false"/>
     <arg name="paused" default="false"/>
