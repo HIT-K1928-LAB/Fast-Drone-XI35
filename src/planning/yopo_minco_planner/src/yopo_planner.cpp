@@ -144,10 +144,12 @@ bool YopoPlanner::plan(
     double score = -std::numeric_limits<double>::infinity(), chosen_mu = 0;
     // 计算安全裕度并排除不安全的
     const double threshold = 1 - std::exp(-c_.safe_radius / c_.radius_lambda);
+    double best_mu = -std::numeric_limits<double>::infinity();
     for (int i = 0; i < 15; ++i) {
         double mu = std::numeric_limits<double>::infinity();
         for (int k = 0; k < 10; ++k)
             mu = std::min(mu, double(out.radius[k * 15 + i] - out.radius[(k + 10) * 15 + i]));
+        best_mu = std::max(best_mu, mu);
         // 选出分数最高的
         if (mu >= threshold && std::isfinite(out.score[i]) && out.score[i] > score) {
             best      = i;
@@ -156,7 +158,8 @@ bool YopoPlanner::plan(
         }
     }
     if (best < 0) {
-        *reason = "no candidate passes predicted corridor threshold";
+        *reason = "no candidate passes predicted corridor threshold; best_mu=" +
+                  std::to_string(best_mu) + " threshold=" + std::to_string(threshold);
         return false;
     }
     // 被选中的候选转变为真实轨迹参数

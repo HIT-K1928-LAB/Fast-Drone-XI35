@@ -26,7 +26,8 @@ depth_height: 480
 min_depth: 0.04
 max_depth: 20.0
 # Predicted corridor threshold, NOT a measured physical-clearance guarantee.
-safe_radius: 0.35
+#safe 0.35→0.20
+safe_radius: 0.20 
 max_speed: 0.8
 max_acceleration: 1.5
 max_jerk: 10.0

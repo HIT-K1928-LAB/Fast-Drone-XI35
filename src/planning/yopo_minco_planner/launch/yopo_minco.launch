@@ -1,7 +1,7 @@
 <launch>
   <arg name="execute" default="false"/>
   <arg name="config_file" default="$(find yopo_minco_planner)/config/real.yaml"/>
-  <arg name="engine_file" default="/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_f16.engine"/>
+  <arg name="engine_file" default="/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine"/>
   <arg name="camera_extrinsic_config" default="/root/Fast-Drone-XI35/src/realflight_modules/VINS-Fusion-gpu/config/fast_drone_250.yaml"/>
   <node pkg="yopo_minco_planner" type="yopo_minco_node" name="yopo_minco_planner" output="screen" required="true">
     <rosparam command="load" file="$(arg config_file)"/>

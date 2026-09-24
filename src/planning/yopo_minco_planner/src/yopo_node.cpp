@@ -278,7 +278,24 @@ class YopoMincoNode {
             p.z() > config_.max_height || goal_.z() < config_.min_height ||
             goal_.z() > config_.max_height || std::abs(goal_.z() - p.z()) > config_.height_band ||
             velocity().norm() > hover_speed_) {
-            ROS_WARN("Trigger rejected: goal/height/speed outside test limits");
+            std::string failed;
+            if (distance < goal_min_ || distance > goal_max_) failed += "distance ";
+            if (p.z() < config_.min_height || p.z() > config_.max_height)
+                failed += "height ";
+            if (goal_.z() < config_.min_height || goal_.z() > config_.max_height)
+                failed += "goal_height ";
+            if (std::abs(goal_.z() - p.z()) > config_.height_band)
+                failed += "height_diff ";
+            const double speed = velocity().norm();
+            if (speed > hover_speed_) failed += "speed ";
+            ROS_WARN_STREAM(
+                "Trigger rejected: " << failed
+                << "; distance=" << distance << " [" << goal_min_ << "," << goal_max_ << "]"
+                << "; height=" << p.z() << " goal_height=" << goal_.z()
+                << " [" << config_.min_height << "," << config_.max_height << "]"
+                << "; height_diff=" << std::abs(goal_.z() - p.z())
+                << " max=" << config_.height_band
+                << "; speed=" << speed << " max=" << hover_speed_);
             return;
         }
         origin_        = p;
