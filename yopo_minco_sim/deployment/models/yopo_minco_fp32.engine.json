@@ -1,0 +1,67 @@
+{
+  "tensorrt": "8.5.2.2",
+  "architecture": "aarch64",
+  "precision": "fp32",
+  "tf32": false,
+  "workspace_mib": 1024,
+  "onnx_sha256": "61749c20609fb7f339a1e25320436ef8ba06c1a7372f032c10f24546d3850acb",
+  "engine_sha256": "81372b8fba5c4fa1709d32d3b498b6cba016c78f1f4dfbce20aa767083ef085a",
+  "bindings": [
+    {
+      "name": "depth",
+      "shape": [
+        1,
+        1,
+        96,
+        160
+      ],
+      "dtype": "DataType.FLOAT",
+      "is_input": true
+    },
+    {
+      "name": "obs",
+      "shape": [
+        1,
+        9,
+        3,
+        5
+      ],
+      "dtype": "DataType.FLOAT",
+      "is_input": true
+    },
+    {
+      "name": "endstate",
+      "shape": [
+        1,
+        14,
+        3,
+        5
+      ],
+      "dtype": "DataType.FLOAT",
+      "is_input": false
+    },
+    {
+      "name": "score",
+      "shape": [
+        1,
+        3,
+        5
+      ],
+      "dtype": "DataType.FLOAT",
+      "is_input": false
+    },
+    {
+      "name": "radius",
+      "shape": [
+        1,
+        20,
+        3,
+        5
+      ],
+      "dtype": "DataType.FLOAT",
+      "is_input": false
+    }
+  ],
+  "numerical_validation": false,
+  "note": "Native TensorRT engine, not a torch2trt state_dict. Validate outputs before deployment."
+}
