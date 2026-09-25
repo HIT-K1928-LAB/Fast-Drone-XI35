@@ -64,6 +64,7 @@ RUN apt-get update && \
     pkg-config \
     openssh-server openssh-client \
     net-tools \
+    netbase \
     build-essential \
     autoconf \
     automake \
@@ -109,6 +110,7 @@ RUN apt-get update && \
     ros-${ROS_VERSION}-visualization-msgs \
     ros-${ROS_VERSION}-vrpn-client-ros \
     ros-${ROS_VERSION}-mavros \
+    ros-${ROS_VERSION}-mavros-extras \
     librealsense2-dev=2.55.1-0~realsense.3336 \
     librealsense2=2.55.1-0~realsense.3336 \
     librealsense2-utils=2.55.1-0~realsense.3336 \
