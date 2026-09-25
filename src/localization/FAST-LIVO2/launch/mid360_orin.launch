@@ -1,0 +1,79 @@
+<launch>
+  <arg name="rviz" default="false"/>
+  <arg name="realsense_json_file"/>
+  <arg name="fastlivo_config_file"/>
+  <arg name="mid360_config"/>
+  <arg name="mid360_frame_id" default="livox_frame"/>
+  <arg name="mid360_publish_freq" default="10.0"/>
+  <arg name="d455_serial_no" default=""/>
+  <arg name="d455_usb_port_id" default=""/>
+
+  <!--
+    Load the machine profile before starting MAVROS. The profile owns
+    /mavros/fcu_url and the remaining connection parameters, so the serial or
+    USB transport is changed in one YAML file instead of in this shared launch.
+  -->
+  <rosparam command="load" file="$(arg fastlivo_config_file)"/>
+  <rosparam command="load"
+            file="$(find mavros)/launch/px4_pluginlists.yaml"
+            ns="mavros"/>
+  <rosparam command="load"
+            file="$(find mavros)/launch/px4_config.yaml"
+            ns="mavros"/>
+
+  <!-- Start MAVROS first. FAST-LIVO2 gates FCU-frame output until PX4 IMU
+       attitude has arrived, so node startup timing cannot expose unaligned
+       odometry. Do not clear /mavros: its connection parameters were loaded
+       from the machine profile above. -->
+  <node name="mavros"
+        pkg="mavros"
+        type="mavros_node"
+        required="true"
+        output="screen"/>
+
+  <!-- Mid-360: host 192.168.1.5, sensor 192.168.1.103. -->
+  <!-- xfer_format=1 publishes the CustomMsg required by lidar_type=1. -->
+  <param name="xfer_format" value="1"/>
+  <param name="multi_topic" value="0"/>
+  <param name="data_src" value="0"/>
+  <param name="publish_freq" type="double"
+         value="$(arg mid360_publish_freq)"/>
+  <param name="output_data_type" value="0"/>
+  <param name="cmdline_str" type="string" value="100000000000000"/>
+  <param name="cmdline_file_path" type="string" value=""/>
+  <param name="user_config_path" type="string"
+         value="$(arg mid360_config)"/>
+  <param name="frame_id" type="string" value="$(arg mid360_frame_id)"/>
+  <param name="enable_lidar_bag" type="bool" value="true"/>
+  <param name="enable_imu_bag" type="bool" value="true"/>
+
+  <node name="livox_lidar_publisher2"
+        pkg="livox_ros_driver2"
+        type="livox_ros_driver2_node"
+        required="true"
+        output="screen"
+        args="100000000000000"/>
+
+  <!-- FAST-LIVO2 consumes only the calibrated D455 RGB stream. -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="serial_no" value="$(arg d455_serial_no)"/>
+    <arg name="usb_port_id" value="$(arg d455_usb_port_id)"/>
+    <arg name="json_file_path" value="$(arg realsense_json_file)"/>
+  </include>
+
+  <!--
+    rs_camera.launch writes its argument defaults into the camera node's
+    private namespace. Reapply the profile afterwards so the D455 values in
+    the unified FAST-LIVO2 YAML take precedence without a separate camera
+    parameter file.
+  -->
+  <rosparam command="load" file="$(arg fastlivo_config_file)"/>
+
+  <node pkg="fast_livo" type="fastlivo_mapping" name="laserMapping"
+        output="screen"/>
+
+  <group if="$(arg rviz)">
+    <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz"
+          args="-d $(find fast_livo)/rviz_cfg/fast_livo2.rviz"/>
+  </group>
+</launch>

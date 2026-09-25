@@ -11,9 +11,14 @@ which is included as part of this source code package.
 */
 
 #include "LIVMapper.h"
+#include "output_path.h"
+#include "pointcloud_publication.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <filesystem>
+#include <stdexcept>
 #include <utility>
 
 LIVMapper::LIVMapper(ros::NodeHandle &nh)
@@ -49,7 +54,10 @@ LIVMapper::LIVMapper(ros::NodeHandle &nh)
   path.header.frame_id = "camera_init";
 }
 
-LIVMapper::~LIVMapper() {}
+LIVMapper::~LIVMapper()
+{
+  if (imu_spinner) imu_spinner->stop();
+}
 
 void LIVMapper::readParameters(ros::NodeHandle &nh)
 {
@@ -123,6 +131,102 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<vector<double>>("extrin_calib/extrinsic_R", extrinR, vector<double>());
   nh.param<vector<double>>("extrin_calib/Pcl", cameraextrinT, vector<double>());
   nh.param<vector<double>>("extrin_calib/Rcl", cameraextrinR, vector<double>());
+
+  nh.param<bool>("body_pose/enabled", body_pose_output_en, false);
+  nh.param<bool>(
+      "body_pose/zero_initial_position", zero_initial_position, true);
+  nh.param<bool>(
+      "body_pose/legacy_mavros_pose_enabled", legacy_mavros_pose_enabled,
+      false);
+  nh.param<double>(
+      "body_pose/mavros_pose_rate_hz", mavros_pose_rate_hz, 50.0);
+  if (legacy_mavros_pose_enabled && mavros_pose_rate_hz <= 0.0)
+  {
+    throw std::runtime_error(
+        "body_pose/mavros_pose_rate_hz must be positive");
+  }
+  nh.param<bool>(
+      "body_pose/px4_external_odometry/enabled",
+      px4_external_odometry_enabled, false);
+  nh.param<std::string>(
+      "body_pose/px4_external_odometry/topic",
+      px4_external_odometry_topic, "/mavros/odometry/out");
+  nh.param<std::string>(
+      "body_pose/px4_external_odometry/frame_id",
+      px4_external_odometry_frame_id, "odom");
+  nh.param<std::string>(
+      "body_pose/px4_external_odometry/child_frame_id",
+      px4_external_odometry_child_frame_id, "base_link");
+  nh.param<double>(
+      "body_pose/px4_external_odometry/rate_hz",
+      px4_external_odometry_rate_hz, 0.0);
+  nh.param<double>(
+      "body_pose/px4_external_odometry/position_stddev",
+      px4_external_position_stddev, 0.05);
+  nh.param<double>(
+      "body_pose/px4_external_odometry/orientation_stddev",
+      px4_external_orientation_stddev, 0.05);
+  nh.param<double>(
+      "body_pose/px4_external_odometry/linear_velocity_stddev",
+      px4_external_linear_velocity_stddev, 0.10);
+  nh.param<double>(
+      "body_pose/px4_external_odometry/angular_velocity_stddev",
+      px4_external_angular_velocity_stddev, 0.05);
+  if (px4_external_odometry_enabled &&
+      (px4_external_odometry_topic.empty() ||
+       px4_external_odometry_frame_id.empty() ||
+       px4_external_odometry_child_frame_id.empty() ||
+       px4_external_odometry_rate_hz < 0.0 ||
+       px4_external_position_stddev <= 0.0 ||
+       px4_external_orientation_stddev <= 0.0 ||
+       px4_external_linear_velocity_stddev <= 0.0 ||
+       px4_external_angular_velocity_stddev <= 0.0))
+  {
+    throw std::runtime_error(
+        "body_pose/px4_external_odometry parameters are invalid");
+  }
+  if (legacy_mavros_pose_enabled && px4_external_odometry_enabled)
+  {
+    throw std::runtime_error(
+        "enable either legacy MAVROS pose or PX4 external odometry, not both");
+  }
+  if (body_pose_output_en)
+  {
+    if (!gravity_align_en)
+    {
+      throw std::runtime_error(
+          "body_pose yaw alignment requires uav/gravity_align_en=true");
+    }
+    vector<double> rotation_fcu_livox;
+    vector<double> translation_fcu_livox;
+    if (!nh.getParam("body_pose/R_fcu_livox", rotation_fcu_livox) ||
+        rotation_fcu_livox.size() != 9 ||
+        !nh.getParam("body_pose/t_fcu_livox", translation_fcu_livox) ||
+        translation_fcu_livox.size() != 3)
+    {
+      throw std::runtime_error(
+          "body_pose requires a 9-element R_fcu_livox and a 3-element "
+          "t_fcu_livox");
+    }
+
+    M3D rotation;
+    rotation << rotation_fcu_livox[0], rotation_fcu_livox[1], rotation_fcu_livox[2],
+                rotation_fcu_livox[3], rotation_fcu_livox[4], rotation_fcu_livox[5],
+                rotation_fcu_livox[6], rotation_fcu_livox[7], rotation_fcu_livox[8];
+    const V3D translation(
+        translation_fcu_livox[0],
+        translation_fcu_livox[1],
+        translation_fcu_livox[2]);
+    const double orthogonality_error =
+        (rotation * rotation.transpose() - M3D::Identity()).norm();
+    if (orthogonality_error > 1e-3 ||
+        std::abs(rotation.determinant() - 1.0) > 1e-3)
+    {
+      throw std::runtime_error("body_pose/R_fcu_livox is not a valid rotation matrix");
+    }
+    body_pose_extrinsic = fast_livo::BodyPoseExtrinsic::FromTargetReference(
+        rotation, translation);
+  }
   nh.param<double>("debug/plot_time", plot_time, -10);
   nh.param<int>("debug/frame_cnt", frame_cnt, 6);
 
@@ -187,8 +291,11 @@ void LIVMapper::initializeComponents()
 
 void LIVMapper::initializeFiles() 
 {
+  pcd_output_dir = fast_livo::resolvePcdOutputDirectory(
+      std::getenv("FASTDRONE_SESSION_LOG_ROOT"),
+      std::filesystem::path(ROOT_DIR));
+
   for (const char *relative_path : {
-           "Log/pcd",
            "Log/image",
            "Log/result",
            "Log/Colmap/images",
@@ -203,6 +310,19 @@ void LIVMapper::initializeFiles()
       ROS_WARN_STREAM("Failed to create FAST-LIVO2 output directory "
                       << relative_path << ": " << error.message());
     }
+  }
+
+  std::error_code pcd_directory_error;
+  std::filesystem::create_directories(pcd_output_dir, pcd_directory_error);
+  if (pcd_directory_error)
+  {
+    ROS_WARN_STREAM("Failed to create FAST-LIVO2 PCD output directory "
+                    << pcd_output_dir << ": "
+                    << pcd_directory_error.message());
+  }
+  else
+  {
+    ROS_INFO_STREAM("FAST-LIVO2 PCD output directory: " << pcd_output_dir);
   }
 
   if (pcd_save_en && colmap_output_en)
@@ -224,7 +344,7 @@ void LIVMapper::initializeFiles()
       }
   }
   if(colmap_output_en) fout_points.open(std::string(ROOT_DIR) + "Log/Colmap/sparse/0/points3D.txt", std::ios::out);
-  if(pcd_save_en) fout_lidar_pos.open(std::string(ROOT_DIR) + "Log/pcd/lidar_poses.txt", std::ios::out);
+  if(pcd_save_en) fout_lidar_pos.open((pcd_output_dir / "lidar_poses.txt").string(), std::ios::out);
   if(img_save_en) fout_visual_pos.open(std::string(ROOT_DIR) + "Log/image/image_poses.txt", std::ios::out);
   fout_pre.open(DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
   fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
@@ -235,7 +355,15 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   sub_pcl = p_pre->lidar_type == AVIA ? 
             nh.subscribe(lid_topic, 200000, &LIVMapper::livox_pcl_cbk, this): 
             nh.subscribe(lid_topic, 200000, &LIVMapper::standard_pcl_cbk, this);
-  sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this);
+  // IMU ingestion and forward propagation must not share the estimator's
+  // callback queue. LIO/VIO updates routinely take tens of milliseconds;
+  // keeping the IMU on the default queue turns a 200 Hz sensor stream into
+  // bursty odometry with long publication gaps.
+  ros::NodeHandle imu_nh(nh);
+  imu_nh.setCallbackQueue(&imu_callback_queue);
+  sub_imu = imu_nh.subscribe(
+      imu_topic, 200000, &LIVMapper::imu_cbk, this,
+      ros::TransportHints().tcpNoDelay());
   sub_img = nh.subscribe(img_topic, img_subscriber_queue_size, &LIVMapper::img_cbk, this);
   
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
@@ -244,17 +372,32 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100);
   pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100);
   pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 10);
+  pubOdomAftMappedLidar =
+      nh.advertise<nav_msgs::Odometry>("/aft_mapped_lidar_to_init", 10);
   pubPath = nh.advertise<nav_msgs::Path>("/path", 10);
   plane_pub = nh.advertise<visualization_msgs::Marker>("/planner_normal", 1);
   voxel_pub = nh.advertise<visualization_msgs::MarkerArray>("/voxels", 1);
   pubLaserCloudDyn = nh.advertise<sensor_msgs::PointCloud2>("/dyn_obj", 100);
   pubLaserCloudDynRmed = nh.advertise<sensor_msgs::PointCloud2>("/dyn_obj_removed", 100);
   pubLaserCloudDynDbg = nh.advertise<sensor_msgs::PointCloud2>("/dyn_obj_dbg_hist", 100);
-  mavros_pose_publisher = nh.advertise<geometry_msgs::PoseStamped>("/mavros/vision_pose/pose", 10);
+  if (legacy_mavros_pose_enabled)
+  {
+    mavros_pose_publisher = nh.advertise<geometry_msgs::PoseStamped>(
+        "/mavros/vision_pose/pose", 10);
+  }
+  if (px4_external_odometry_enabled)
+  {
+    px4_external_odometry_publisher = nh.advertise<nav_msgs::Odometry>(
+        px4_external_odometry_topic, 20);
+  }
   pubImage = it.advertise("/rgb_img", 1);
   pubImuPropOdom = nh.advertise<nav_msgs::Odometry>("/LIVO2/imu_propagate", 10000);
-  imu_prop_timer = nh.createTimer(ros::Duration(0.004), &LIVMapper::imu_prop_callback, this);
   voxelmap_manager->voxel_map_pub_= nh.advertise<visualization_msgs::MarkerArray>("/planes", 10000);
+
+  // One worker preserves IMU callback order. Publishing is event-driven:
+  // exactly one propagated state is produced for every fresh IMU sample.
+  imu_spinner.reset(new ros::AsyncSpinner(1, &imu_callback_queue));
+  imu_spinner->start();
 }
 
 void LIVMapper::handleFirstFrame() 
@@ -286,13 +429,44 @@ void LIVMapper::gravityAlignment()
   }
 }
 
+void LIVMapper::tryInitializeBodyPoseAlignment()
+{
+  if (!body_pose_output_en || body_pose_alignment_finished ||
+      p_imu->imu_need_init ||
+      (gravity_align_en && !gravity_align_finished))
+  {
+    return;
+  }
+
+  const fast_livo::RigidBodyState initial_body_state =
+      makeUnalignedBodyState(_state);
+  initial_body_position = initial_body_state.position;
+  const double livo_yaw =
+      fast_livo::yawFromRotation(initial_body_state.rotation);
+  body_pose_world_alignment =
+      fast_livo::worldRotationToZeroInitialBodyYaw(
+          initial_body_state.rotation);
+  body_pose_alignment_finished = true;
+
+  ROS_INFO(
+      "FAST-LIVO2 world initialized from FCU body: initial yaw %.3f deg "
+      "-> 0 deg, zero_position=%s",
+      livo_yaw * 180.0 / M_PI,
+      zero_initial_position ? "true" : "false");
+}
+
 void LIVMapper::processImu() 
 {
   // double t0 = omp_get_wtime();
 
   p_imu->Process2(LidarMeasures, _state, feats_undistort);
+  if (!p_imu->imu_need_init)
+  {
+    imu_prop_buffering_enabled.store(true, std::memory_order_release);
+  }
 
   if (gravity_align_en) gravityAlignment();
+  tryInitializeBodyPoseAlignment();
 
   state_propagat = _state;
   voxelmap_manager->state_ = _state;
@@ -347,6 +521,7 @@ void LIVMapper::handleVIO()
 
   if (imu_prop_enable) 
   {
+    std::lock_guard<std::mutex> lock(mtx_buffer_imu_prop);
     ekf_finish_once = true;
     latest_ekf_state = _state;
     latest_ekf_time = LidarMeasures.last_lio_update_time;
@@ -416,6 +591,7 @@ void LIVMapper::handleLIO()
 
   if (imu_prop_enable) 
   {
+    std::lock_guard<std::mutex> lock(mtx_buffer_imu_prop);
     ekf_finish_once = true;
     latest_ekf_state = _state;
     latest_ekf_time = LidarMeasures.last_lio_update_time;
@@ -487,7 +663,6 @@ void LIVMapper::handleLIO()
   if (pub_effect_point_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
   if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap();
   publish_path(pubPath);
-  publish_mavros(mavros_pose_publisher);
 
   frame_num++;
   aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t4 - t0) / frame_num;
@@ -526,8 +701,9 @@ void LIVMapper::savePCD()
 {
   if (pcd_save_en && (pcl_wait_save->points.size() > 0 || pcl_wait_save_intensity->points.size() > 0) && pcd_save_interval < 0) 
   {
-    std::string raw_points_dir = std::string(ROOT_DIR) + "Log/pcd/all_raw_points.pcd";
-    std::string downsampled_points_dir = std::string(ROOT_DIR) + "Log/pcd/all_downsampled_points.pcd";
+    std::string raw_points_dir = (pcd_output_dir / "all_raw_points.pcd").string();
+    std::string downsampled_points_dir =
+        (pcd_output_dir / "all_downsampled_points.pcd").string();
     pcl::PCDWriter pcd_writer;
 
     if (img_en)
@@ -614,11 +790,11 @@ void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D 
   imu_prop_state.vel_end = imu_prop_state.vel_end + acc_imu * dt;
 }
 
-void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
+void LIVMapper::propagateImuOdometry()
 {
-  if (p_imu->imu_need_init || !new_imu || !ekf_finish_once) { return; }
-  mtx_buffer_imu_prop.lock();
-  new_imu = false; // 控制propagate频率和IMU频率一致
+  std::lock_guard<std::mutex> lock(mtx_buffer_imu_prop);
+  if (!new_imu || !ekf_finish_once) return;
+  new_imu = false;
   if (imu_prop_enable && !prop_imu_buffer.empty())
   {
     static double last_t_from_lidar_end_time = 0;
@@ -653,26 +829,53 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
       last_t_from_lidar_end_time = t_from_lidar_end_time;
     }
 
-    V3D posi, vel_i;
-    Eigen::Quaterniond q;
-    posi = imu_propagate.pos_end;
-    vel_i = imu_propagate.vel_end;
-    q = Eigen::Quaterniond(imu_propagate.rot_end);
-    imu_prop_odom.header.frame_id = "world";
-    imu_prop_odom.header.stamp = newest_imu.header.stamp;
-    imu_prop_odom.pose.pose.position.x = posi.x();
-    imu_prop_odom.pose.pose.position.y = posi.y();
-    imu_prop_odom.pose.pose.position.z = posi.z();
-    imu_prop_odom.pose.pose.orientation.w = q.w();
-    imu_prop_odom.pose.pose.orientation.x = q.x();
-    imu_prop_odom.pose.pose.orientation.y = q.y();
-    imu_prop_odom.pose.pose.orientation.z = q.z();
-    imu_prop_odom.twist.twist.linear.x = vel_i.x();
-    imu_prop_odom.twist.twist.linear.y = vel_i.y();
-    imu_prop_odom.twist.twist.linear.z = vel_i.z();
-    pubImuPropOdom.publish(imu_prop_odom);
+    if (bodyPoseOutputReady())
+    {
+      const V3D angular_velocity_reference(
+          newest_imu.angular_velocity.x - imu_propagate.bias_g.x(),
+          newest_imu.angular_velocity.y - imu_propagate.bias_g.y(),
+          newest_imu.angular_velocity.z - imu_propagate.bias_g.z());
+      const fast_livo::RigidBodyState output_state = makeOutputBodyState(
+          imu_propagate, angular_velocity_reference);
+      const Eigen::Quaterniond q(output_state.rotation);
+      imu_prop_odom.header.frame_id = "world";
+      imu_prop_odom.header.stamp = newest_imu.header.stamp;
+      imu_prop_odom.pose.pose.position.x = output_state.position.x();
+      imu_prop_odom.pose.pose.position.y = output_state.position.y();
+      imu_prop_odom.pose.pose.position.z = output_state.position.z();
+      imu_prop_odom.pose.pose.orientation.w = q.w();
+      imu_prop_odom.pose.pose.orientation.x = q.x();
+      imu_prop_odom.pose.pose.orientation.y = q.y();
+      imu_prop_odom.pose.pose.orientation.z = q.z();
+      imu_prop_odom.twist.twist.linear.x = output_state.velocity.x();
+      imu_prop_odom.twist.twist.linear.y = output_state.velocity.y();
+      imu_prop_odom.twist.twist.linear.z = output_state.velocity.z();
+      pubImuPropOdom.publish(imu_prop_odom);
+
+      // MAVROS ODOMETRY follows REP-147: pose is expressed in the parent
+      // frame, while twist is expressed in the child (FCU body) frame.
+      // Do not remap /LIVO2/imu_propagate directly because its linear
+      // velocity is deliberately kept in the local world frame for PX4Ctrl.
+      publishPx4ExternalOdometry(
+          output_state, angular_velocity_reference, newest_imu.header.stamp);
+
+      // The pose-only path is retained only as an explicit legacy option.
+      // It must stay disabled when ODOMETRY is enabled, otherwise EKF2 sees
+      // two external-vision streams describing the same estimator.
+      if (legacy_mavros_pose_enabled)
+      {
+        const ros::Time pose_stamp = newest_imu.header.stamp;
+        const ros::Duration publish_period(1.0 / mavros_pose_rate_hz);
+        if (last_mavros_pose_stamp.isZero() ||
+            pose_stamp < last_mavros_pose_stamp ||
+            pose_stamp - last_mavros_pose_stamp >= publish_period)
+        {
+          publish_mavros(mavros_pose_publisher, output_state, pose_stamp);
+          last_mavros_pose_stamp = pose_stamp;
+        }
+      }
+    }
   }
-  mtx_buffer_imu_prop.unlock();
 }
 
 void LIVMapper::transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud, PointCloudXYZI::Ptr &trans_cloud)
@@ -811,51 +1014,53 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 {
   if (!imu_en) return;
 
-  if (last_timestamp_lidar < 0.0) return;
+  const double lidar_timestamp = last_timestamp_lidar.load();
+  if (lidar_timestamp < 0.0) return;
   // ROS_INFO("get imu at time: %.6f", msg_in->header.stamp.toSec());
   sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
   msg->header.stamp = ros::Time().fromSec(msg->header.stamp.toSec() - imu_time_offset);
   double timestamp = msg->header.stamp.toSec();
 
-  if (fabs(last_timestamp_lidar - timestamp) > 0.5 && (!ros_driver_fix_en))
+  if (fabs(lidar_timestamp - timestamp) > 0.5 && (!ros_driver_fix_en))
   {
-    ROS_WARN("IMU and LiDAR not synced! delta time: %lf .\n", last_timestamp_lidar - timestamp);
+    ROS_WARN("IMU and LiDAR not synced! delta time: %lf .\n", lidar_timestamp - timestamp);
   }
 
-  if (ros_driver_fix_en) timestamp += std::round(last_timestamp_lidar - timestamp);
+  if (ros_driver_fix_en) timestamp += std::round(lidar_timestamp - timestamp);
   msg->header.stamp = ros::Time().fromSec(timestamp);
 
-  mtx_buffer.lock();
-
-  if (last_timestamp_imu > 0.0 && timestamp < last_timestamp_imu)
   {
-    mtx_buffer.unlock();
-    sig_buffer.notify_all();
-    ROS_ERROR("imu loop back, offset: %lf \n", last_timestamp_imu - timestamp);
-    return;
+    std::lock_guard<std::mutex> lock(mtx_buffer);
+    const double previous_imu_timestamp = last_timestamp_imu.load();
+    if (previous_imu_timestamp > 0.0 && timestamp < previous_imu_timestamp)
+    {
+      ROS_ERROR("imu loop back, offset: %lf \n", previous_imu_timestamp - timestamp);
+      return;
+    }
+
+    // if (previous_imu_timestamp > 0.0 && timestamp > previous_imu_timestamp + 0.2)
+    // {
+
+    //   ROS_WARN("imu time stamp Jumps %0.4lf seconds \n", timestamp - previous_imu_timestamp);
+    //   return;
+    // }
+
+    last_timestamp_imu = timestamp;
+
+    imu_buffer.push_back(msg);
+    // cout<<"got imu: "<<timestamp<<" imu size "<<imu_buffer.size()<<endl;
   }
-
-  // if (last_timestamp_imu > 0.0 && timestamp > last_timestamp_imu + 0.2)
-  // {
-
-  //   ROS_WARN("imu time stamp Jumps %0.4lf seconds \n", timestamp - last_timestamp_imu);
-  //   mtx_buffer.unlock();
-  //   sig_buffer.notify_all();
-  //   return;
-  // }
-
-  last_timestamp_imu = timestamp;
-
-  imu_buffer.push_back(msg);
-  // cout<<"got imu: "<<timestamp<<" imu size "<<imu_buffer.size()<<endl;
-  mtx_buffer.unlock();
   if (imu_prop_enable)
   {
     mtx_buffer_imu_prop.lock();
-    if (imu_prop_enable && !p_imu->imu_need_init) { prop_imu_buffer.push_back(*msg); }
+    if (imu_prop_buffering_enabled.load(std::memory_order_acquire))
+    {
+      prop_imu_buffer.push_back(*msg);
+    }
     newest_imu = *msg;
     new_imu = true;
     mtx_buffer_imu_prop.unlock();
+    propagateImuOdometry();
   }
   sig_buffer.notify_all();
 }
@@ -1251,9 +1456,12 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
   { 
     pcl::toROSMsg(*pcl_w_wait_pub, laserCloudmsg); 
   }
-  laserCloudmsg.header.stamp = ros::Time::now(); //.fromSec(last_timestamp_lidar);
-  laserCloudmsg.header.frame_id = "camera_init";
-  pubLaserCloudFullRes.publish(laserCloudmsg);
+  if (fast_livo::hasPublishablePoints(laserCloudmsg))
+  {
+    laserCloudmsg.header.stamp = ros::Time::now(); //.fromSec(last_timestamp_lidar);
+    laserCloudmsg.header.frame_id = "camera_init";
+    pubLaserCloudFullRes.publish(laserCloudmsg);
+  }
 
   /**************** save map ****************/
   /* 1. make sure you have enough memories
@@ -1309,7 +1517,8 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
     }
     if ((pcl_wait_save->size() > 0 || pcl_wait_save_intensity->size() > 0) && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval)
     {
-      string all_points_dir(string(string(ROOT_DIR) + "Log/pcd/") + ss_time.str() + string(".pcd"));
+      const string all_points_dir =
+          (pcd_output_dir / (ss_time.str() + ".pcd")).string();
 
       pcl::PCDWriter pcd_writer;
 
@@ -1389,47 +1598,208 @@ void LIVMapper::publish_effect_world(const ros::Publisher &pubLaserCloudEffect, 
   pubLaserCloudEffect.publish(laserCloudFullRes3);
 }
 
+fast_livo::RigidBodyState LIVMapper::makeReferenceState(
+    const StatesGroup &state) const
+{
+  fast_livo::RigidBodyState reference_state;
+  reference_state.rotation = state.rot_end;
+  reference_state.position = state.pos_end;
+  reference_state.velocity = state.vel_end;
+  return reference_state;
+}
+
+fast_livo::RigidBodyState LIVMapper::makeOutputBodyState(
+    const StatesGroup &state,
+    const V3D &angular_velocity_reference) const
+{
+  const fast_livo::RigidBodyState body_state = makeUnalignedBodyState(
+      state, angular_velocity_reference);
+  if (!body_pose_output_en || !body_pose_alignment_finished) return body_state;
+  if (zero_initial_position)
+  {
+    return fast_livo::alignWorldFrameAtInitialPosition(
+        body_state, body_pose_world_alignment, initial_body_position);
+  }
+  return fast_livo::rotateWorldFrame(
+      body_state, body_pose_world_alignment);
+}
+
+fast_livo::RigidBodyState LIVMapper::makeUnalignedBodyState(
+    const StatesGroup &state,
+    const V3D &angular_velocity_reference) const
+{
+  const fast_livo::RigidBodyState reference_state = makeReferenceState(state);
+  if (!body_pose_output_en) return reference_state;
+  return body_pose_extrinsic.transform(
+      reference_state, angular_velocity_reference);
+}
+
+bool LIVMapper::bodyPoseOutputReady() const
+{
+  return !body_pose_output_en || body_pose_alignment_finished;
+}
+
+template <typename T> void LIVMapper::set_posestamp(
+    T &out, const fast_livo::RigidBodyState &state)
+{
+  const Eigen::Quaterniond orientation(state.rotation);
+  out.position.x = state.position.x();
+  out.position.y = state.position.y();
+  out.position.z = state.position.z();
+  out.orientation.x = orientation.x();
+  out.orientation.y = orientation.y();
+  out.orientation.z = orientation.z();
+  out.orientation.w = orientation.w();
+}
+
 template <typename T> void LIVMapper::set_posestamp(T &out)
 {
-  out.position.x = _state.pos_end(0);
-  out.position.y = _state.pos_end(1);
-  out.position.z = _state.pos_end(2);
-  out.orientation.x = geoQuat.x;
-  out.orientation.y = geoQuat.y;
-  out.orientation.z = geoQuat.z;
-  out.orientation.w = geoQuat.w;
+  set_posestamp(out, makeOutputBodyState(_state));
 }
 
 void LIVMapper::publish_odometry(const ros::Publisher &pubOdomAftMapped)
 {
+  const ros::Time stamp = ros::Time::now();
+  const fast_livo::RigidBodyState lidar_state = makeReferenceState(_state);
+
+  if (body_pose_output_en)
+  {
+    odomAftMappedLidar.header.frame_id = "camera_init";
+    odomAftMappedLidar.child_frame_id = "aft_mapped_lidar";
+    odomAftMappedLidar.header.stamp = stamp;
+    set_posestamp(odomAftMappedLidar.pose.pose, lidar_state);
+    pubOdomAftMappedLidar.publish(odomAftMappedLidar);
+  }
+
+  if (!bodyPoseOutputReady()) return;
+
+  const fast_livo::RigidBodyState output_state = makeOutputBodyState(_state);
   odomAftMapped.header.frame_id = "camera_init";
   odomAftMapped.child_frame_id = "aft_mapped";
-  odomAftMapped.header.stamp = ros::Time::now(); //.ros::Time()fromSec(last_timestamp_lidar);
-  set_posestamp(odomAftMapped.pose.pose);
+  odomAftMapped.header.stamp = stamp;
+  set_posestamp(odomAftMapped.pose.pose, output_state);
 
   static tf::TransformBroadcaster br;
   tf::Transform transform;
   tf::Quaternion q;
-  transform.setOrigin(tf::Vector3(_state.pos_end(0), _state.pos_end(1), _state.pos_end(2)));
-  q.setW(geoQuat.w);
-  q.setX(geoQuat.x);
-  q.setY(geoQuat.y);
-  q.setZ(geoQuat.z);
+  transform.setOrigin(tf::Vector3(
+      output_state.position.x(),
+      output_state.position.y(),
+      output_state.position.z()));
+  const Eigen::Quaterniond output_orientation(output_state.rotation);
+  q.setW(output_orientation.w());
+  q.setX(output_orientation.x());
+  q.setY(output_orientation.y());
+  q.setZ(output_orientation.z());
   transform.setRotation(q);
-  br.sendTransform( tf::StampedTransform(transform, odomAftMapped.header.stamp, "camera_init", "aft_mapped") );
+  br.sendTransform(tf::StampedTransform(
+      transform, stamp, "camera_init", "aft_mapped"));
+
+  if (body_pose_output_en)
+  {
+    tf::Transform lidar_transform;
+    lidar_transform.setOrigin(tf::Vector3(
+        lidar_state.position.x(),
+        lidar_state.position.y(),
+        lidar_state.position.z()));
+    const Eigen::Quaterniond lidar_orientation(lidar_state.rotation);
+    tf::Quaternion lidar_q(
+        lidar_orientation.x(),
+        lidar_orientation.y(),
+        lidar_orientation.z(),
+        lidar_orientation.w());
+    lidar_transform.setRotation(lidar_q);
+    br.sendTransform(tf::StampedTransform(
+        lidar_transform, stamp, "camera_init", "aft_mapped_lidar"));
+  }
   pubOdomAftMapped.publish(odomAftMapped);
 }
 
-void LIVMapper::publish_mavros(const ros::Publisher &mavros_pose_publisher)
+void LIVMapper::publish_mavros(
+    const ros::Publisher &mavros_pose_publisher,
+    const fast_livo::RigidBodyState &state,
+    const ros::Time &stamp)
 {
-  msg_body_pose.header.stamp = ros::Time::now();
-  msg_body_pose.header.frame_id = "camera_init";
-  set_posestamp(msg_body_pose.pose);
-  mavros_pose_publisher.publish(msg_body_pose);
+  geometry_msgs::PoseStamped vision_pose;
+  vision_pose.header.stamp = stamp;
+  vision_pose.header.frame_id = "camera_init";
+  set_posestamp(vision_pose.pose, state);
+  mavros_pose_publisher.publish(vision_pose);
+}
+
+void LIVMapper::publishPx4ExternalOdometry(
+    const fast_livo::RigidBodyState &state,
+    const V3D &angular_velocity_reference,
+    const ros::Time &stamp)
+{
+  if (!px4_external_odometry_enabled) return;
+
+  if (px4_external_odometry_rate_hz > 0.0)
+  {
+    const ros::Duration publish_period(1.0 / px4_external_odometry_rate_hz);
+    if (!last_px4_external_odometry_stamp.isZero() &&
+        stamp >= last_px4_external_odometry_stamp &&
+        stamp - last_px4_external_odometry_stamp < publish_period)
+    {
+      return;
+    }
+  }
+
+  nav_msgs::Odometry odometry;
+  odometry.header.stamp = stamp;
+  odometry.header.frame_id = px4_external_odometry_frame_id;
+  odometry.child_frame_id = px4_external_odometry_child_frame_id;
+
+  const Eigen::Quaterniond orientation(state.rotation);
+  odometry.pose.pose.position.x = state.position.x();
+  odometry.pose.pose.position.y = state.position.y();
+  odometry.pose.pose.position.z = state.position.z();
+  odometry.pose.pose.orientation.w = orientation.w();
+  odometry.pose.pose.orientation.x = orientation.x();
+  odometry.pose.pose.orientation.y = orientation.y();
+  odometry.pose.pose.orientation.z = orientation.z();
+
+  const V3D linear_velocity_body = state.rotation.transpose() * state.velocity;
+  const V3D angular_velocity_body =
+      body_pose_extrinsic.rotationReferenceTarget().transpose() *
+      angular_velocity_reference;
+  odometry.twist.twist.linear.x = linear_velocity_body.x();
+  odometry.twist.twist.linear.y = linear_velocity_body.y();
+  odometry.twist.twist.linear.z = linear_velocity_body.z();
+  odometry.twist.twist.angular.x = angular_velocity_body.x();
+  odometry.twist.twist.angular.y = angular_velocity_body.y();
+  odometry.twist.twist.angular.z = angular_velocity_body.z();
+
+  const double position_variance =
+      px4_external_position_stddev * px4_external_position_stddev;
+  const double orientation_variance =
+      px4_external_orientation_stddev * px4_external_orientation_stddev;
+  const double linear_velocity_variance =
+      px4_external_linear_velocity_stddev *
+      px4_external_linear_velocity_stddev;
+  const double angular_velocity_variance =
+      px4_external_angular_velocity_stddev *
+      px4_external_angular_velocity_stddev;
+  odometry.pose.covariance[0] = position_variance;
+  odometry.pose.covariance[7] = position_variance;
+  odometry.pose.covariance[14] = position_variance;
+  odometry.pose.covariance[21] = orientation_variance;
+  odometry.pose.covariance[28] = orientation_variance;
+  odometry.pose.covariance[35] = orientation_variance;
+  odometry.twist.covariance[0] = linear_velocity_variance;
+  odometry.twist.covariance[7] = linear_velocity_variance;
+  odometry.twist.covariance[14] = linear_velocity_variance;
+  odometry.twist.covariance[21] = angular_velocity_variance;
+  odometry.twist.covariance[28] = angular_velocity_variance;
+  odometry.twist.covariance[35] = angular_velocity_variance;
+
+  px4_external_odometry_publisher.publish(odometry);
+  last_px4_external_odometry_stamp = stamp;
 }
 
 void LIVMapper::publish_path(const ros::Publisher pubPath)
 {
+  if (!bodyPoseOutputReady()) return;
   set_posestamp(msg_body_pose.pose);
   msg_body_pose.header.stamp = ros::Time::now();
   msg_body_pose.header.frame_id = "camera_init";

@@ -6,8 +6,199 @@
 #include <cmath>
 #include <limits>
 
+#include "body_pose_extrinsic.h"
 #include "image_patch_utils.h"
+#include "initial_heading_alignment.h"
+#include "output_path.h"
+#include "pointcloud_publication.h"
 #include "vio.h"
+
+namespace
+{
+
+fast_livo::BodyPoseExtrinsic makeFcuFromLivoxCalibration()
+{
+  Eigen::Matrix3d rotation_fcu_livox;
+  rotation_fcu_livox <<
+      0.928719158327664, 0.028186162369961323, 0.3697110563751235,
+     -0.025166576674429137, 0.9995988842847866, -0.012988993613829738,
+     -0.36992886934334507, 0.0027587655689106172, 0.9290559836946805;
+  const Eigen::Vector3d translation_fcu_livox(
+      -0.030591146664829438,
+      -0.036910287242114814,
+      -0.03524249759870778);
+  return fast_livo::BodyPoseExtrinsic::FromTargetReference(
+      rotation_fcu_livox, translation_fcu_livox);
+}
+
+}  // namespace
+
+TEST(PcdOutputPath, UsesTmuxSessionLogRootWhenAvailable)
+{
+  EXPECT_EQ(
+      std::filesystem::path(
+          "/root/Fast-Drone-XI35/log/2026-09-19_10-25-42_orin-lidar-01_lidar/fastlivo2/pcd"),
+      fast_livo::resolvePcdOutputDirectory(
+          "/root/Fast-Drone-XI35/log/2026-09-19_10-25-42_orin-lidar-01_lidar",
+          "/root/Fast-Drone-XI35/src/localization/FAST-LIVO2"));
+}
+
+TEST(PcdOutputPath, FallsBackToPackageLogDirectoryWithoutTmuxEnvironment)
+{
+  const std::filesystem::path package_root(
+      "/root/Fast-Drone-XI35/src/localization/FAST-LIVO2");
+
+  EXPECT_EQ(
+      package_root / "Log" / "pcd",
+      fast_livo::resolvePcdOutputDirectory(nullptr, package_root));
+  EXPECT_EQ(
+      package_root / "Log" / "pcd",
+      fast_livo::resolvePcdOutputDirectory("", package_root));
+}
+
+TEST(BodyPoseExtrinsic, InvertsKalibrTargetFromReferenceConvention)
+{
+  const fast_livo::BodyPoseExtrinsic extrinsic =
+      makeFcuFromLivoxCalibration();
+
+  Eigen::Matrix3d rotation_fcu_livox;
+  rotation_fcu_livox <<
+      0.928719158327664, 0.028186162369961323, 0.3697110563751235,
+     -0.025166576674429137, 0.9995988842847866, -0.012988993613829738,
+     -0.36992886934334507, 0.0027587655689106172, 0.9290559836946805;
+  const Eigen::Vector3d translation_fcu_livox(
+      -0.030591146664829438,
+      -0.036910287242114814,
+      -0.03524249759870778);
+
+  EXPECT_TRUE((rotation_fcu_livox * extrinsic.rotationReferenceTarget())
+                  .isApprox(Eigen::Matrix3d::Identity(), 1e-9));
+  EXPECT_TRUE((rotation_fcu_livox * extrinsic.translationReferenceTarget() +
+               translation_fcu_livox)
+                  .isZero(1e-9));
+}
+
+TEST(BodyPoseExtrinsic, TransformsPoseAndLeverArmVelocityToTargetFrame)
+{
+  const fast_livo::BodyPoseExtrinsic extrinsic =
+      makeFcuFromLivoxCalibration();
+  fast_livo::RigidBodyState reference_state;
+  reference_state.rotation =
+      Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ())
+          .toRotationMatrix();
+  reference_state.position = Eigen::Vector3d(1.0, 2.0, 3.0);
+  reference_state.velocity = Eigen::Vector3d(4.0, 5.0, 6.0);
+  const Eigen::Vector3d angular_velocity_reference(0.0, 0.0, 2.0);
+
+  const fast_livo::RigidBodyState target_state = extrinsic.transform(
+      reference_state, angular_velocity_reference);
+
+  EXPECT_TRUE(target_state.rotation.isApprox(
+      reference_state.rotation * extrinsic.rotationReferenceTarget(), 1e-9));
+  EXPECT_TRUE(target_state.position.isApprox(
+      reference_state.position +
+          reference_state.rotation * extrinsic.translationReferenceTarget(),
+      1e-9));
+  EXPECT_TRUE(target_state.velocity.isApprox(
+      reference_state.velocity + reference_state.rotation *
+          angular_velocity_reference.cross(
+              extrinsic.translationReferenceTarget()),
+      1e-9));
+}
+
+TEST(InitialHeadingAlignment, ZerosInitialBodyYawAndRotatesWorldVectors)
+{
+  fast_livo::RigidBodyState body_state;
+  body_state.rotation =
+      Eigen::AngleAxisd(M_PI / 3.0, Eigen::Vector3d::UnitZ())
+          .toRotationMatrix();
+  body_state.position = Eigen::Vector3d(1.0, 0.0, 2.0);
+  body_state.velocity = Eigen::Vector3d(0.0, 2.0, 0.0);
+
+  const Eigen::Matrix3d world_alignment =
+      fast_livo::worldRotationToZeroInitialBodyYaw(body_state.rotation);
+  const fast_livo::RigidBodyState aligned =
+      fast_livo::rotateWorldFrame(body_state, world_alignment);
+
+  EXPECT_NEAR(fast_livo::yawFromRotation(aligned.rotation), 0.0, 1e-12);
+  EXPECT_TRUE(aligned.position.isApprox(
+      Eigen::Vector3d(0.5, -std::sqrt(3.0) / 2.0, 2.0), 1e-12));
+  EXPECT_TRUE(aligned.velocity.isApprox(
+      Eigen::Vector3d(std::sqrt(3.0), 1.0, 0.0), 1e-12));
+}
+
+TEST(InitialHeadingAlignment, ZerosInitialBodyPositionAndYaw)
+{
+  fast_livo::RigidBodyState initial_state;
+  initial_state.rotation =
+      (Eigen::AngleAxisd(40.0 * M_PI / 180.0, Eigen::Vector3d::UnitZ()) *
+       Eigen::AngleAxisd(-8.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()) *
+       Eigen::AngleAxisd(5.0 * M_PI / 180.0, Eigen::Vector3d::UnitX()))
+          .toRotationMatrix();
+  initial_state.position = Eigen::Vector3d(1.2, -0.7, 0.3);
+  initial_state.velocity = Eigen::Vector3d(0.4, -0.2, 0.1);
+
+  const Eigen::Matrix3d world_alignment =
+      fast_livo::worldRotationToZeroInitialBodyYaw(initial_state.rotation);
+  const fast_livo::RigidBodyState aligned =
+      fast_livo::alignWorldFrameAtInitialPosition(
+          initial_state, world_alignment, initial_state.position);
+
+  EXPECT_NEAR(fast_livo::yawFromRotation(aligned.rotation), 0.0, 1e-12);
+  EXPECT_TRUE(aligned.position.isZero(1e-12));
+  EXPECT_NEAR(
+      aligned.rotation.col(2).z(), initial_state.rotation.col(2).z(), 1e-12);
+  EXPECT_TRUE(aligned.velocity.isApprox(
+      world_alignment * initial_state.velocity, 1e-12));
+}
+
+TEST(InitialHeadingAlignment, UsesFcuBodyAfterLivoxExtrinsic)
+{
+  const fast_livo::BodyPoseExtrinsic extrinsic =
+      makeFcuFromLivoxCalibration();
+  fast_livo::RigidBodyState livox_state;
+  livox_state.rotation =
+      (Eigen::AngleAxisd(0.8, Eigen::Vector3d::UnitZ()) *
+       Eigen::AngleAxisd(-0.2, Eigen::Vector3d::UnitY()))
+          .toRotationMatrix();
+  livox_state.position = Eigen::Vector3d(2.0, -1.0, 0.4);
+  livox_state.velocity = Eigen::Vector3d(0.5, -0.3, 0.1);
+
+  const fast_livo::RigidBodyState initial_fcu_state =
+      extrinsic.transform(livox_state);
+  const Eigen::Matrix3d world_alignment =
+      fast_livo::worldRotationToZeroInitialBodyYaw(
+          initial_fcu_state.rotation);
+  const fast_livo::RigidBodyState aligned_livox_state =
+      fast_livo::rotateWorldFrame(livox_state, world_alignment);
+  const fast_livo::RigidBodyState aligned_fcu_state =
+      extrinsic.transform(aligned_livox_state);
+
+  EXPECT_NEAR(
+      fast_livo::yawFromRotation(aligned_fcu_state.rotation), 0.0, 1e-12);
+}
+
+TEST(PointCloudPublication, RejectsMessagesWithoutPoints)
+{
+  sensor_msgs::PointCloud2 cloud;
+
+  EXPECT_FALSE(fast_livo::hasPublishablePoints(cloud));
+
+  cloud.width = 1;
+  EXPECT_FALSE(fast_livo::hasPublishablePoints(cloud));
+}
+
+TEST(PointCloudPublication, AcceptsMessagesWithPointsAndPayload)
+{
+  sensor_msgs::PointCloud2 cloud;
+  cloud.width = 1;
+  cloud.height = 1;
+  cloud.point_step = 16;
+  cloud.row_step = 16;
+  cloud.data.resize(16);
+
+  EXPECT_TRUE(fast_livo::hasPublishablePoints(cloud));
+}
 
 TEST(ImagePatchBounds, AcceptsTheExactMaximumRawAccessExtent)
 {

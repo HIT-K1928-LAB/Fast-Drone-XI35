@@ -14,12 +14,20 @@ which is included as part of this source code package.
 #define LIV_MAPPER_H
 
 #include "IMU_Processing.h"
+#include "body_pose_extrinsic.h"
+#include "initial_heading_alignment.h"
 #include "vio.h"
 #include "preprocess.h"
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <nav_msgs/Path.h>
+#include <ros/callback_queue.h>
+#include <ros/spinner.h>
 #include <vikit/camera_loader.h>
+
+#include <atomic>
+#include <filesystem>
+#include <memory>
 
 class LIVMapper
 {
@@ -31,6 +39,7 @@ public:
   void initializeFiles();
   void run();
   void gravityAlignment();
+  void tryInitializeBodyPoseAlignment();
   void handleFirstFrame();
   void stateEstimationAndMapping();
   void handleVIO();
@@ -40,7 +49,7 @@ public:
   
   bool sync_packages(LidarMeasureGroup &meas);
   void prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D acc_avr, V3D angvel_avr);
-  void imu_prop_callback(const ros::TimerEvent &e);
+  void propagateImuOdometry();
   void transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud, PointCloudXYZI::Ptr &trans_cloud);
   void pointBodyToWorld(const PointType &pi, PointType &po);
   void RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po);
@@ -54,9 +63,26 @@ public:
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
   void publish_effect_world(const ros::Publisher &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list);
   void publish_odometry(const ros::Publisher &pubOdomAftMapped);
-  void publish_mavros(const ros::Publisher &mavros_pose_publisher);
+  void publish_mavros(
+      const ros::Publisher &mavros_pose_publisher,
+      const fast_livo::RigidBodyState &state,
+      const ros::Time &stamp);
+  void publishPx4ExternalOdometry(
+      const fast_livo::RigidBodyState &state,
+      const V3D &angular_velocity_reference,
+      const ros::Time &stamp);
   void publish_path(const ros::Publisher pubPath);
   void readParameters(ros::NodeHandle &nh);
+  fast_livo::RigidBodyState makeReferenceState(const StatesGroup &state) const;
+  fast_livo::RigidBodyState makeUnalignedBodyState(
+      const StatesGroup &state,
+      const V3D &angular_velocity_reference = V3D::Zero()) const;
+  fast_livo::RigidBodyState makeOutputBodyState(
+      const StatesGroup &state,
+      const V3D &angular_velocity_reference = V3D::Zero()) const;
+  bool bodyPoseOutputReady() const;
+  template <typename T> void set_posestamp(
+      T &out, const fast_livo::RigidBodyState &state);
   template <typename T> void set_posestamp(T &out);
   template <typename T> void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &po);
   template <typename T> Eigen::Matrix<T, 3, 1> pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi);
@@ -69,16 +95,38 @@ public:
   std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map;
   
   string root_dir;
+  std::filesystem::path pcd_output_dir;
   string lid_topic, imu_topic, seq_name, img_topic;
   V3D extT;
   M3D extR;
+  bool body_pose_output_en = false;
+  fast_livo::BodyPoseExtrinsic body_pose_extrinsic;
+  bool zero_initial_position = true;
+  bool legacy_mavros_pose_enabled = false;
+  double mavros_pose_rate_hz = 50.0;
+  ros::Time last_mavros_pose_stamp;
+  bool px4_external_odometry_enabled = false;
+  std::string px4_external_odometry_topic = "/mavros/odometry/out";
+  std::string px4_external_odometry_frame_id = "odom";
+  std::string px4_external_odometry_child_frame_id = "base_link";
+  double px4_external_odometry_rate_hz = 0.0;
+  double px4_external_position_stddev = 0.05;
+  double px4_external_orientation_stddev = 0.05;
+  double px4_external_linear_velocity_stddev = 0.10;
+  double px4_external_angular_velocity_stddev = 0.05;
+  ros::Time last_px4_external_odometry_stamp;
+  M3D body_pose_world_alignment = M3D::Identity();
+  V3D initial_body_position = V3D::Zero();
+  std::atomic<bool> body_pose_alignment_finished{false};
 
   int feats_down_size = 0, max_iterations = 0;
 
   double res_mean_last = 0.05;
   double gyr_cov = 0, acc_cov = 0, inv_expo_cov = 0;
   double blind_rgb_points = 0.0;
-  double last_timestamp_lidar = -1.0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
+  std::atomic<double> last_timestamp_lidar{-1.0};
+  std::atomic<double> last_timestamp_imu{-1.0};
+  double last_timestamp_img = -1.0;
   double filter_size_surf_min = 0;
   double filter_size_pcd = 0;
   double _first_lidar_time = 0.0;
@@ -95,12 +143,17 @@ public:
 
   StatesGroup imu_propagate, latest_ekf_state;
 
+  // Guarded by mtx_buffer_imu_prop. The IMU worker and estimator thread
+  // must never inspect or modify these flags without holding that mutex.
   bool new_imu = false, state_update_flg = false, imu_prop_enable = true, ekf_finish_once = false;
   deque<sensor_msgs::Imu> prop_imu_buffer;
   sensor_msgs::Imu newest_imu;
   double latest_ekf_time;
   nav_msgs::Odometry imu_prop_odom;
   ros::Publisher pubImuPropOdom;
+  ros::CallbackQueue imu_callback_queue;
+  std::unique_ptr<ros::AsyncSpinner> imu_spinner;
+  std::atomic<bool> imu_prop_buffering_enabled{false};
   double imu_time_offset = 0.0;
   double lidar_time_offset = 0.0;
 
@@ -161,6 +214,7 @@ public:
 
   nav_msgs::Path path;
   nav_msgs::Odometry odomAftMapped;
+  nav_msgs::Odometry odomAftMappedLidar;
   geometry_msgs::Quaternion geoQuat;
   geometry_msgs::PoseStamped msg_body_pose;
 
@@ -180,13 +234,14 @@ public:
   ros::Publisher pubLaserCloudEffect;
   ros::Publisher pubLaserCloudMap;
   ros::Publisher pubOdomAftMapped;
+  ros::Publisher pubOdomAftMappedLidar;
   ros::Publisher pubPath;
   ros::Publisher pubLaserCloudDyn;
   ros::Publisher pubLaserCloudDynRmed;
   ros::Publisher pubLaserCloudDynDbg;
   image_transport::Publisher pubImage;
   ros::Publisher mavros_pose_publisher;
-  ros::Timer imu_prop_timer;
+  ros::Publisher px4_external_odometry_publisher;
 
   int frame_num = 0;
   double aver_time_consu = 0;
