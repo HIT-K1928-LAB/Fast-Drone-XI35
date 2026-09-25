@@ -60,7 +60,14 @@ class FlightDispatchTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.splitlines(),
-            ["pc", "pc_sim", "xi35_10", "xi35_default", "xi35_euroc"],
+            [
+                "orin-lidar-01",
+                "pc",
+                "pc_sim",
+                "xi35_10",
+                "xi35_default",
+                "xi35_euroc",
+            ],
         )
 
 

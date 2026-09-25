@@ -14,6 +14,12 @@ tmux_cmd() {
 configure_tmux_session() {
     : "${SESSION:?SESSION is required}"
 
+    local default_command
+    if [ -n "${PROFILE_TMUX_SCRIPT:-}" ]; then
+        default_command="$(build_profile_interactive_shell_invocation)"
+        tmux_cmd set-option -t "$SESSION" default-command "$default_command"
+    fi
+
     tmux_cmd set-option -t "$SESSION" mouse on
 
     # Ptyxis/VTE ignores OSC52 clipboard writes. Keep mouse selection and
@@ -235,13 +241,12 @@ open_interactive_pane_shell() {
     local previous_command="${1:-}"
     local rc_file
 
-    if [ -z "$previous_command" ]; then
-        exec bash --noprofile --norc -i
-    fi
-
     rc_file="$(mktemp "${TMPDIR:-/tmp}/fastdrone-pane-bashrc.XXXXXX")" || return
-    printf 'command rm -f %q\nbuiltin history -s %q\n' \
-        "$rc_file" "$previous_command" >"$rc_file"
+    printf 'command rm -f %q\nsource %q >/dev/null\n' \
+        "$rc_file" "$WORKSPACE/devel/setup.bash" >"$rc_file"
+    if [ -n "$previous_command" ]; then
+        printf 'builtin history -s %q\n' "$previous_command" >>"$rc_file"
+    fi
     exec bash --noprofile --rcfile "$rc_file" -i
 }
 
@@ -356,6 +361,12 @@ build_profile_pane_invocation() {
         "$PROFILE_TMUX_SCRIPT" "$ready_signal" "$LAYOUT_GATE" "$command_plan"
 }
 
+build_profile_interactive_shell_invocation() {
+    printf 'FASTDRONE_SESSION_START=%q FASTDRONE_SESSION_LOG_ROOT=%q bash %q --interactive-shell' \
+        "$FASTDRONE_SESSION_START" "$FASTDRONE_SESSION_LOG_ROOT" \
+        "$PROFILE_TMUX_SCRIPT"
+}
+
 new_window() {
     local name="$1"
     shift
@@ -457,6 +468,14 @@ run_profile_pane_shell() {
     open_interactive_pane_shell "$previous_command"
 }
 
+run_profile_interactive_shell() {
+    setup_profile_runtime_environment
+    cd "$WORKSPACE"
+    export PS1='\u@\h:\w\$ '
+    set +e
+    open_interactive_pane_shell
+}
+
 create_status_window() {
     local git_branch git_commit git_worktree camera_type
     if git -C "$WORKSPACE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -512,6 +531,11 @@ run_tmux_profile() {
         --pane-shell)
             shift
             run_profile_pane_shell "$@"
+            return
+            ;;
+        --interactive-shell)
+            if [ "$#" -ne 1 ]; then return 64; fi
+            run_profile_interactive_shell
             return
             ;;
         "") ;;

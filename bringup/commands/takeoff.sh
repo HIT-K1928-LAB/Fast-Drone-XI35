@@ -1,1 +1,1 @@
-rostopic pub -1 /px4ctrl/takeoff_land quadrotor_msgs/TakeoffLand "takeoff_land_cmd: 1"
+rostopic pub -1 /offboard_fsm/command px4ctrl/FsmCommand "{command: 1, takeoff_height: 0.0, request_id: 1}"
