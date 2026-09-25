@@ -12,6 +12,23 @@ usage() {
     echo "  $0 clear"
     echo "  $0 delete"
     echo "  $0 convert"
+    echo "  $0 size"
+}
+
+show_log_size() {
+    local size_kb
+
+    mkdir -p "$LOG_DIR"
+    size_kb=$(du -sk -- "$LOG_DIR" | awk '{print $1}')
+
+    echo "Log directory: $LOG_DIR"
+    if [ "$size_kb" -ge $((1024 * 1024)) ]; then
+        LC_ALL=C awk -v size_kb="$size_kb" \
+            'BEGIN { printf "Total size: %.2f GB\n", size_kb / 1024 / 1024 }'
+    else
+        LC_ALL=C awk -v size_kb="$size_kb" \
+            'BEGIN { printf "Total size: %.2f MB\n", size_kb / 1024 }'
+    fi
 }
 
 delete_logs() {
@@ -93,6 +110,9 @@ case "${1:-}" in
         ;;
     convert)
         convert_ros_log_dirs
+        ;;
+    size | usage)
+        show_log_size
         ;;
     -h | --help | help | "")
         usage

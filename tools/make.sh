@@ -195,13 +195,25 @@ for database in databases:
                 source = os.path.normpath(os.path.join(command.get("directory", ""), source))
             commands_by_file[source] = command
 
-output = os.path.join(workspace, "compile_commands.json")
-temporary = output + ".tmp"
-with open(temporary, "w", encoding="utf-8") as stream:
-    json.dump(list(commands_by_file.values()), stream, indent=2)
-    stream.write("\n")
-os.replace(temporary, output)
-print(f"Merged {len(commands_by_file)} entries from {len(databases)} databases into {output}")
+outputs = [
+    os.path.join(workspace, "compile_commands.json"),
+    # The VS Code clangd configuration uses --compile-commands-dir=build.
+    # Keep the same merged database there so clangd never falls back to an
+    # include-path-free command for ROS/catkin source files.
+    os.path.join(workspace, "build", "compile_commands.json"),
+]
+payload = list(commands_by_file.values())
+for output in outputs:
+    temporary = output + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, indent=2)
+        stream.write("\n")
+    os.replace(temporary, output)
+
+print(
+    f"Merged {len(commands_by_file)} entries from {len(databases)} databases "
+    f"into {', '.join(outputs)}"
+)
 PY
 }
 
