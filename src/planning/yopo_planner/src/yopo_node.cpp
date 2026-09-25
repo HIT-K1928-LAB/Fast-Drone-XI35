@@ -1,6 +1,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <geometry_msgs/PoseStamped.h>
 #include <limits>
@@ -20,6 +21,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <std_msgs/Header.h>
+#include <vector>
 
 namespace yopo_planner {
 
@@ -93,15 +95,31 @@ class YopoPlannerNode {
         pnh_.param(
             "use_config_camera_extrinsic", use_config_camera_extrinsic,
             use_config_camera_extrinsic);
-        if (use_config_camera_extrinsic) {
-            Eigen::Matrix3d rotation_body_optical;
+        Eigen::Matrix3d rotation_body_optical;
+        Eigen::Vector3d translation_body_optical = Eigen::Vector3d::Zero();
+        const bool use_parameter_camera_extrinsic =
+            pnh_.hasParam("camera_extrinsic/rotation_body_depth");
+        if (use_parameter_camera_extrinsic) {
+            if (!loadCameraExtrinsicFromParams(&rotation_body_optical, &translation_body_optical)) {
+                ROS_FATAL("Failed to load YOPO depth-camera extrinsic from ROS parameters.");
+                ros::shutdown();
+                return;
+            }
+            setOpticalToBodyExtrinsic(rotation_body_optical, translation_body_optical);
+            extrinsic_ready_logged_ = true;
+            ROS_INFO(
+                "YOPO loaded Depth-optical-to-body extrinsic from private parameters; "
+                "translation=[%.6f %.6f %.6f] m.",
+                translation_body_optical.x(), translation_body_optical.y(),
+                translation_body_optical.z());
+        } else if (use_config_camera_extrinsic) {
             if (!loadCameraExtrinsicFromConfig(
                     camera_extrinsic_config, camera_extrinsic_key, &rotation_body_optical)) {
                 ROS_FATAL("Failed to load YOPO camera extrinsic from config.");
                 ros::shutdown();
                 return;
             }
-            setOpticalToBodyExtrinsic(rotation_body_optical);
+            setOpticalToBodyExtrinsic(rotation_body_optical, Eigen::Vector3d::Zero());
             extrinsic_ready_logged_ = true;
             ROS_INFO(
                 "YOPO loaded camera optical-to-body extrinsic from %s:%s",
@@ -130,7 +148,7 @@ class YopoPlannerNode {
         goal_sub_ = nh_.subscribe(goal_topic, 1, &YopoPlannerNode::goalCallback, this);
         traj_start_sub_ =
             nh_.subscribe(traj_start_topic, 1, &YopoPlannerNode::trajStartCallback, this);
-        if (!use_config_camera_extrinsic) {
+        if (!use_parameter_camera_extrinsic && !use_config_camera_extrinsic) {
             extrinsic_sub_ = nh_.subscribe(
                 extrinsic_topic, 1, &YopoPlannerNode::extrinsicCallback, this,
                 ros::TransportHints().tcpNoDelay());
@@ -147,7 +165,7 @@ class YopoPlannerNode {
         if (depth_replan_rate_ > 0.0) {
             ROS_INFO("YOPO depth replanning limited to %.2f Hz.", depth_replan_rate_);
         }
-        if (planner_->requiresCameraExtrinsic()) {
+        if (planner_->requiresCameraExtrinsic() && !planner_->cameraExtrinsicReady()) {
             ROS_INFO(
                 "YOPO waiting for camera-to-body extrinsic from %s before publishing control "
                 "commands.",
@@ -186,7 +204,9 @@ class YopoPlannerNode {
             msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
             msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
         const Eigen::Matrix3d rotation_body_optical = q.normalized().toRotationMatrix();
-        setOpticalToBodyExtrinsic(rotation_body_optical);
+        const Eigen::Vector3d translation_body_optical(
+            msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+        setOpticalToBodyExtrinsic(rotation_body_optical, translation_body_optical);
         if (!extrinsic_ready_logged_) {
             ROS_INFO(
                 "YOPO received camera optical-to-body extrinsic and converted YOPO frame to body.");
@@ -198,8 +218,49 @@ class YopoPlannerNode {
         return (Eigen::Matrix3d() << 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0).finished();
     }
 
-    void setOpticalToBodyExtrinsic(const Eigen::Matrix3d& rotation_body_optical) {
+    void setOpticalToBodyExtrinsic(
+        const Eigen::Matrix3d& rotation_body_optical,
+        const Eigen::Vector3d& translation_body_optical) {
         planner_->setCameraToBodyExtrinsic(rotation_body_optical * rotationOpticalYopo());
+        translation_body_optical_ = translation_body_optical;
+    }
+
+    bool loadCameraExtrinsicFromParams(
+        Eigen::Matrix3d* rotation_body_optical, Eigen::Vector3d* translation_body_optical) const {
+        if (!rotation_body_optical || !translation_body_optical) return false;
+
+        std::vector<double> rotation;
+        std::vector<double> translation;
+        if (!pnh_.getParam("camera_extrinsic/rotation_body_depth", rotation) ||
+            rotation.size() != 9) {
+            ROS_ERROR("camera_extrinsic/rotation_body_depth must contain 9 numbers.");
+            return false;
+        }
+        if (!pnh_.getParam("camera_extrinsic/translation_body_depth", translation) ||
+            translation.size() != 3) {
+            ROS_ERROR("camera_extrinsic/translation_body_depth must contain 3 numbers.");
+            return false;
+        }
+
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                (*rotation_body_optical)(r, c) = rotation[3 * r + c];
+            }
+            (*translation_body_optical)(r) = translation[r];
+        }
+        const double orthogonality_error =
+            (rotation_body_optical->transpose() * (*rotation_body_optical) -
+             Eigen::Matrix3d::Identity())
+                .norm();
+        const double determinant = rotation_body_optical->determinant();
+        if (!rotation_body_optical->allFinite() || !translation_body_optical->allFinite() ||
+            orthogonality_error > 1e-3 || std::abs(determinant - 1.0) > 1e-3) {
+            ROS_ERROR(
+                "Invalid camera extrinsic rotation: det=%.9f, orthogonality error=%.9g.",
+                determinant, orthogonality_error);
+            return false;
+        }
+        return true;
     }
 
     bool loadCameraExtrinsicFromConfig(
@@ -618,12 +679,13 @@ class YopoPlannerNode {
     ros::Subscriber extrinsic_sub_;
     ros::Timer ctrl_timer_;
 
-    bool verbose_                     = false;
-    bool visualize_                   = true;
-    bool wait_for_traj_start_trigger_ = false;
-    bool control_enabled_             = true;
-    bool extrinsic_ready_logged_      = false;
-    bool has_last_depth_plan_time_    = false;
+    bool verbose_                             = false;
+    bool visualize_                           = true;
+    bool wait_for_traj_start_trigger_         = false;
+    bool control_enabled_                     = true;
+    bool extrinsic_ready_logged_              = false;
+    Eigen::Vector3d translation_body_optical_ = Eigen::Vector3d::Zero();
+    bool has_last_depth_plan_time_            = false;
     Clock::time_point last_depth_plan_time_;
     double depth_replan_rate_  = 0.0;
     double depth_fps_          = 30.0;
