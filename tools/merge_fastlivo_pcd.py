@@ -158,20 +158,34 @@ def merge_pcd_directory(pcd_dir: Path, dry_run: bool = False) -> str:
     if not slice_paths:
         return "empty"
 
-    output_path = pcd_dir / _session_output_name(pcd_dir.parent.parent)
-    if dry_run:
-        total_bytes = sum(path.stat().st_size for path in slice_paths)
-        print(
-            "DRY RUN {}: would merge {} slices ({:.2f} MiB) -> {}".format(
-                pcd_dir, len(slice_paths), total_bytes / (1024.0 * 1024.0), output_path.name))
-        return "dry-run"
+    metadata = []
+    corrupt_count = 0
+    for path in slice_paths:
+        try:
+            metadata.append(inspect_binary_pcd(path))
+        except (OSError, ValueError, PcdError) as error:
+            corrupt_count += 1
+            print("SKIP CORRUPT {}: {}".format(path, error))
 
-    metadata = [inspect_binary_pcd(path) for path in slice_paths]
+    if not metadata:
+        raise PcdError("{}: no valid PCD slices; preserved {} corrupt slices".format(
+            pcd_dir, corrupt_count))
+
     first = metadata[0]
     for current in metadata[1:]:
         if current.schema != first.schema or current.point_step != first.point_step:
             raise PcdError(
                 "{}: PCD schema differs from {}".format(current.path, first.path))
+
+    output_path = pcd_dir / _session_output_name(pcd_dir.parent.parent)
+    if dry_run:
+        total_bytes = sum(item.path.stat().st_size for item in metadata)
+        print(
+            "DRY RUN {}: would merge {} valid slices ({:.2f} MiB), "
+            "preserve {} corrupt slices -> {}".format(
+                pcd_dir, len(metadata), total_bytes / (1024.0 * 1024.0),
+                corrupt_count, output_path.name))
+        return "dry-run"
 
     total_points = sum(item.point_count for item in metadata)
     total_payload_bytes = sum(item.payload_bytes for item in metadata)
@@ -208,12 +222,12 @@ def merge_pcd_directory(pcd_dir: Path, dry_run: bool = False) -> str:
 
         os.replace(str(temporary_path), str(output_path))
         temporary_path = None
-        for path in slice_paths:
-            path.unlink()
+        for item in metadata:
+            item.path.unlink()
 
         print(
-            "MERGED {}: {} slices, {} points -> {}".format(
-                pcd_dir, len(slice_paths), total_points, output_path.name))
+            "MERGED {}: {} valid slices, {} points, preserved {} corrupt slices -> {}".format(
+                pcd_dir, len(metadata), total_points, corrupt_count, output_path.name))
         return "merged"
     finally:
         if temporary_path is not None and temporary_path.exists():
