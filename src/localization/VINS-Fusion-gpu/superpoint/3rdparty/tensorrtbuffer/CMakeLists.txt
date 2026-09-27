@@ -22,9 +22,11 @@ else()
     message(STATUS "external path for tensorrt not found")
 endif()
 
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+# Build artifacts must stay in the active build tree.  The source tree may
+# contain a prebuilt library for a different CPU architecture, which must not
+# be mistaken for the output of this target on Jetson/aarch64.
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
 
 add_library(tensorrtbuffer SHARED src/logger.cpp src/sample_options.cpp src/sample_utils.cpp)
-
 
 
