@@ -1,0 +1,25 @@
+uint8 WAIT_FCU=0
+uint8 PRESTREAM=1
+uint8 GROUND=2
+uint8 ARMING=3
+uint8 TAKEOFF=4
+uint8 HOVER=5
+uint8 EXTERNAL=6
+uint8 BRAKE=7
+uint8 LANDING=8
+uint8 DISARMING=9
+uint8 FAILSAFE=10
+
+std_msgs/Header header
+uint8 state
+string state_name
+bool enabled
+bool connected
+bool armed
+string px4_mode
+uint8 landed_state
+bool odometry_fresh
+bool planner_fresh
+geometry_msgs/Point reference_position
+float32 reference_yaw
+string last_transition_reason

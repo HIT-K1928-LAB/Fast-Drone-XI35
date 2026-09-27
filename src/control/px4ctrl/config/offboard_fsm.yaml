@@ -1,0 +1,116 @@
+schema_version: 1
+
+node:
+  control_rate: 50.0
+  status_rate: 10.0
+  start_enabled: true
+  prestream_when_ready: true
+  prestream_min_time: 1.2
+  request_offboard_automatically: true
+
+topics:
+  mavros_state: "/mavros/state"
+  extended_state: "/mavros/extended_state"
+  px4_odometry: "/mavros/local_position/odom"
+  livo_odometry: "/LIVO2/imu_propagate"
+  rc_input: "/mavros/rc/in"
+  planner_command: "/position_cmd"
+  planner_emergency_hover: "/planning/Emergency_hover"
+  fsm_command: "/offboard_fsm/command"
+  planner_lifecycle: "/px4ctrl/takeoff_land"
+  setpoint: "/mavros/setpoint_raw/local"
+  status: "/offboard_fsm/status"
+  reference: "/offboard_fsm/reference"
+  diagnostics: "/diagnostics"
+
+services:
+  arming: "/mavros/cmd/arming"
+  set_mode: "/mavros/set_mode"
+  message_interval: "/mavros/set_message_interval"
+
+timeouts:
+  mavros_state: 0.5
+  extended_state: 1.0
+  px4_odometry: 0.30
+  livo_odometry: 0.30
+  planner_command: 0.25
+  rc_input: 0.5
+  arm_request: 5.0
+  disarm_request: 5.0
+  takeoff: 10.0
+  landing: 30.0
+
+# A debounced rising edge on one RC switch is interpreted by FSM state:
+# GROUND -> TAKEOFF; ARMING or any flying state -> LAND; all other states ignore.
+# Channel numbers follow index_base. With index_base=1, channel 7 means
+# channels[6] in mavros_msgs/RCIn.
+rc:
+  enabled: true
+  index_base: 1
+  debounce_time: 0.15
+  require_release_before_trigger: true
+  takeoff_land:
+    channel: 9
+    reversed: false
+    trigger_pwm: 1700
+    release_pwm: 1300
+
+takeoff:
+  relative_height: 0.7
+  max_velocity: 0.4
+  max_acceleration: 0.5
+  max_jerk: 1.0
+  position_tolerance: 0.08
+  velocity_tolerance: 0.12
+  stable_time: 1.0
+
+planner:
+  activation_messages: 3
+  max_position_jump: 0.5
+  max_yaw_jump_deg: 30.0
+  max_velocity: 3.0
+  max_acceleration: 4.0
+  brake_acceleration: 1.0
+  brake_velocity_tolerance: 0.15
+  brake_stable_time: 0.5
+
+landing:
+  strategy: "offboard_descent"
+  max_velocity: 0.30
+  max_acceleration: 0.40
+  flare_height: 0.30
+  flare_velocity: 0.15
+  touchdown_confirm_time: 1.0
+  auto_disarm: true
+  disarm_delay: 1.0
+  max_descent_distance: 10.0
+
+frames:
+  align_planner_on_offboard_entry: true
+
+limits:
+  max_horizontal_distance: 10.0
+  max_height_above_origin: 3.0
+  min_height_below_origin: -0.30
+
+failsafe:
+  stop_setpoints_on_critical_failure: true
+
+requests:
+  retry_interval: 1.0
+
+# Each enabled entry is sent once through /mavros/set_message_interval after
+# MAVROS connects. Add or remove entries without recompiling the node.
+message_intervals:
+  enabled: true
+  reapply_on_reconnect: true
+  retry_count: 3
+  retry_delay: 0.5
+  messages:
+    - {name: "ATTITUDE_QUATERNION", id: 31, rate: 100.0, enabled: false, required: false}
+    - {name: "LOCAL_POSITION_NED", id: 32, rate: 50.0, enabled: false, required: true}
+    - {name: "RC_CHANNELS", id: 65, rate: 20.0, enabled: true, required: false}
+    - {name: "HIGHRES_IMU", id: 105, rate: 50.0, enabled: false, required: false}
+    - {name: "BATTERY_STATUS", id: 147, rate: 10.0, enabled: true, required: false}
+    - {name: "EXTENDED_SYS_STATE", id: 245, rate: 5.0, enabled: true, required: true}
+    - {name: "SYS_STATUS", id: 1, rate: 2.0, enabled: true, required: false}

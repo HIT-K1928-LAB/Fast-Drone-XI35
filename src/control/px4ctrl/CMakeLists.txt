@@ -1,71 +1,103 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.0.2)
 project(px4ctrl)
 
-set(CMAKE_VERBOSE_MAKEFILE "false")
-
-set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS "-std=c++11")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
+add_compile_options(-std=c++14 -Wall -Wextra -Wpedantic)
 
 find_package(catkin REQUIRED COMPONENTS
+  diagnostic_msgs
+  geometry_msgs
+  message_generation
+  mavros_msgs
+  nav_msgs
+  quadrotor_msgs
   roscpp
   rospy
-  dynamic_reconfigure
-  quadrotor_msgs
-  geometry_msgs
-  sensor_msgs
-  uav_utils
-  mavros
+  std_msgs
+  std_srvs
 )
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-find_package(Eigen3 REQUIRED)
+add_message_files(
+  FILES
+  FsmCommand.msg
+  FsmStatus.msg
+)
 
-generate_dynamic_reconfigure_options(
-  cfg/PID.cfg
+generate_messages(
+  DEPENDENCIES
+  geometry_msgs
+  std_msgs
 )
 
 catkin_package(
+  INCLUDE_DIRS include
+  CATKIN_DEPENDS
+    diagnostic_msgs
+    geometry_msgs
+    message_runtime
+    mavros_msgs
+    nav_msgs
+    quadrotor_msgs
+    roscpp
+    rospy
+    std_msgs
+    std_srvs
 )
 
 include_directories(
-  ${catkin_INCLUDE_DIRS}
-  ${EIGEN_INCLUDE_DIRS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  include/${PROJECT_NAME}
   include
+  ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(px4ctrl_node
-  src/px4ctrl_node.cpp
-  src/PX4CtrlFSM.cpp
-  src/PX4CtrlParam.cpp
-  src/controller.cpp
-  src/input.cpp
+add_library(px4_offboard_fsm_core
+  src/config.cpp
+  src/fsm_core.cpp
 )
+add_dependencies(px4_offboard_fsm_core
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+target_link_libraries(px4_offboard_fsm_core ${catkin_LIBRARIES})
 
-add_dependencies(px4ctrl_node ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_gencfg)
-
-target_link_libraries(px4ctrl_node
+add_executable(offboard_fsm_node src/offboard_fsm_node.cpp)
+add_dependencies(offboard_fsm_node
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+target_link_libraries(offboard_fsm_node
+  px4_offboard_fsm_core
   ${catkin_LIBRARIES}
 )
 
-if(CATKIN_ENABLE_TESTING)
-  catkin_add_gtest(px4ctrl_thrust_model_test
-    test/thrust_model_config_test.cpp
-    src/PX4CtrlFSM.cpp
-    src/PX4CtrlParam.cpp
-    src/controller.cpp
-    src/input.cpp
-  )
-  if(TARGET px4ctrl_thrust_model_test)
-    add_dependencies(px4ctrl_thrust_model_test ${catkin_EXPORTED_TARGETS})
-    target_link_libraries(px4ctrl_thrust_model_test ${catkin_LIBRARIES})
-  endif()
-endif()
-
 catkin_install_python(PROGRAMS
-  scripts/pid_setpoint_excitation.py
-  thrust_calibrate_scrips/thrust_calibrate.py
+  scripts/adaptive_circle_trajectory.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(TARGETS px4_offboard_fsm_core offboard_fsm_node
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
+
+install(DIRECTORY launch config
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_nosetests(test/test_adaptive_circle_trajectory.py)
+  catkin_add_gtest(offboard_fsm_core_test test/offboard_fsm_core_test.cpp)
+  if(TARGET offboard_fsm_core_test)
+    add_dependencies(offboard_fsm_core_test
+      ${${PROJECT_NAME}_EXPORTED_TARGETS}
+      ${catkin_EXPORTED_TARGETS}
+    )
+    target_link_libraries(offboard_fsm_core_test
+      px4_offboard_fsm_core
+      ${catkin_LIBRARIES}
+    )
+  endif()
+endif()

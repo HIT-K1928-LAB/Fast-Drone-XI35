@@ -1,12 +1,14 @@
 <launch>
-	<arg name="config_file" default="$(find px4ctrl)/config/ctrl_param_fpv.yaml" />
-	<arg name="odom_topic" default="/kf_fusion/kf_imu_odom" />
-	<node pkg="px4ctrl" type="px4ctrl_node" name="px4ctrl" output="screen">
-		<!-- <remap from="~odom" to="/vicon_imu_ekf_odom" /> -->
-		<!-- <remap from="~odom" to="/vins_fusion/imu_propagate" /> -->
-		<!-- <remap from="~odom" to="/motion_capture/motion_capture_odom" /> -->
-		<remap from="~odom" to="$(arg odom_topic)" />
-		<remap from="~cmd" to="/position_cmd" />
-		<rosparam command="load" file="$(arg config_file)" />
-	</node>
+  <arg name="config_file" default="$(find px4ctrl)/config/offboard_fsm.yaml"/>
+  <arg name="odom_topic" default="/LIVO2/imu_propagate"/>
+
+  <node pkg="px4ctrl"
+        type="offboard_fsm_node"
+        name="px4_offboard_fsm"
+        output="screen"
+        required="true">
+    <rosparam command="load" file="$(arg config_file)"/>
+    <!-- Allow one profile YAML to serve multiple localization modes. -->
+    <param name="topics/livo_odometry" value="$(arg odom_topic)"/>
+  </node>
 </launch>
