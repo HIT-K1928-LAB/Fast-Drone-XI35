@@ -1,0 +1,8 @@
+<launch>
+  <!-- Use only when no other node has opened the D455. No flight nodes are started. -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="align_depth" value="true" />
+    <arg name="enable_sync" value="true" />
+  </include>
+  <include file="$(find yolo_trt_detector)/launch/yolo_rgbd_test.launch" />
+</launch>

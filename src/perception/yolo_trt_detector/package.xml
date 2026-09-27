@@ -17,5 +17,7 @@
   <depend>tf2</depend>
   <depend>visualization_msgs</depend>
   <depend>image_transport</depend>
+  <depend>message_filters</depend>
   <depend>cv_bridge_454</depend>
+  <exec_depend>realsense2_camera</exec_depend>
 </package>

@@ -1,0 +1,14 @@
+<launch>
+  <!-- Ground test: subscribe to the existing D455 topics and publish images/markers only. -->
+  <arg name="engine_file" default="$(find yolo_trt_detector)/models/best_rgbd.engine" />
+  <arg name="image_topic" default="/camera/color/image_raw" />
+  <arg name="depth_topic" default="/camera/aligned_depth_to_color/image_raw" />
+  <arg name="rviz" default="false" />
+  <include file="$(find yolo_trt_detector)/launch/yolo_trt_detector.launch">
+    <arg name="engine_file" value="$(arg engine_file)" />
+    <arg name="image_topic" value="$(arg image_topic)" />
+    <arg name="depth_topic" value="$(arg depth_topic)" />
+    <arg name="publish_target_point" value="false" />
+    <arg name="rviz" value="$(arg rviz)" />
+  </include>
+</launch>

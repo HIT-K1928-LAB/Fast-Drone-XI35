@@ -13,15 +13,16 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   visualization_msgs
   image_transport
+  message_filters
   cv_bridge_454
 )
 
 if(EXISTS "/usr/local/include/tensorrt")
-    message(STATUS "tensorrt include directory: /usr/local/include/tensorrt")
-    link_directories(/usr/local/tensorrt/lib)
-    include_directories(/usr/local/include/tensorrt)
+  message(STATUS "tensorrt include directory: /usr/local/include/tensorrt")
+  link_directories(/usr/local/tensorrt/lib)
+  include_directories(/usr/local/include/tensorrt)
 else()
-    message(STATUS "external path for tensorrt not found")
+  message(STATUS "external path for tensorrt not found")
 endif()
 
 set(OpenCV_DIR /usr/local/opencv-4.5.4/lib/cmake/opencv4)
@@ -29,7 +30,7 @@ find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
 
 catkin_package(
-  CATKIN_DEPENDS roscpp geometry_msgs nav_msgs sensor_msgs std_msgs tf2 visualization_msgs image_transport
+  CATKIN_DEPENDS roscpp geometry_msgs nav_msgs sensor_msgs std_msgs tf2 visualization_msgs image_transport message_filters cv_bridge_454
 )
 
 include_directories(
@@ -54,3 +55,14 @@ target_link_libraries(yolo_trt_node
   ${CUDA_LIBRARIES}
   nvinfer
 )
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(yolo_image_orientation_test
+    test/test_image_orientation.cpp
+  )
+  if(TARGET yolo_image_orientation_test)
+    target_link_libraries(yolo_image_orientation_test
+      ${OpenCV_LIBRARIES}
+    )
+  endif()
+endif()
