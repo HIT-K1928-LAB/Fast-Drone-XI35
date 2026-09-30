@@ -49,3 +49,17 @@ max_sensor_skew: 0.1
 plan_timeout: 0.25
 max_tracking_error: 0.5
 max_invalid_depth_fraction: 0.3
+
+# Recovery uses monotonic time; only corridor rejection is recoverable.
+# Launch auto_resume:=true is an explicit opt-in; default requires confirmation.
+recovery_enabled: true
+recovery_auto_resume: false
+recovery_stable_hold: 1.0
+recovery_hover_speed: 0.10
+recovery_position_band: 0.10
+recovery_timeout: 30.0
+recovery_good_span: 0.4
+recovery_good_frames: 5
+recovery_max_attempts: 3
+recovery_max_no_progress: 2
+recovery_min_progress: 0.05

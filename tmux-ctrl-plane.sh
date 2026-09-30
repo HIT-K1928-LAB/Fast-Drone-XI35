@@ -145,14 +145,13 @@ start_common_windows() {
         "source $YOPO_WS/devel/setup.bash; roslaunch yopo_minco_planner yopo_minco.launch execute:=false engine_file:=/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine" \
         "manual"
     create_window "minco" \
-        "source $YOPO_WS/devel/setup.bash; roslaunch yopo_minco_planner yopo_minco.launch execute:=true engine_file:=/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine" \
+        "source $YOPO_WS/devel/setup.bash; roslaunch yopo_minco_planner yopo_minco.launch execute:=true engine_file:=/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine auto_resume:=true" \
         "manual"
-    create_window "pub_goal" \
-        "bash /root/data/yopo-minco-flight-shallow/pub_goal.sh" \
+    create_window "minco_goal" \
+        "source $YOPO_WS/devel/setup.bash; rosrun yopo_minco_planner minco_goal.py" \
         "manual"
-    create_window "minco_start" \
-    "rostopic pub -1 /traj_start_trigger geometry_msgs/PoseStamped '{header: {stamp: now, frame_id: \"world\"}, pose: {orientation: {w: 1.0}}}'" \
-    "manual"
+    # Console: x y z / resume / stop. Existing sessions are not modified.
+
 }
 
 # 程序启动 #

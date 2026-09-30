@@ -42,6 +42,8 @@ rosbag record -O "$BAG_NAME" \
   /move_base_simple/goal \
   /traj_start_trigger \
   /yopo_minco/status \
+  /yopo_minco/recovery_state \
+  /yopo_minco/accepted_goal \
   /yopo_minco/stop \
   /yopo_minco/best_trajectory \
   /position_cmd \

@@ -1,4 +1,13 @@
 #include "yopo_minco_planner/yopo_planner.h"
+#include "yopo_minco_planner/recovery_gate.h"
+#include "yopo_minco_planner/StartGoal.h"
+#include <std_srvs/Trigger.h>
+#include <std_msgs/Bool.h>
+#include <sensor_msgs/Imu.h>
+#include <mavros_msgs/RCIn.h>
+#include <mavros_msgs/ExtendedState.h>
+#include <quadrotor_msgs/TakeoffLand.h>
+#include <sstream>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -86,6 +95,32 @@ class YopoMincoNode {
             throw std::runtime_error(
                 "Real-flight launch requires /use_sim_time=false; replay uses wall-time/restamped "
                 "input");
+        private_.param("recovery_enabled", recovery_enabled_, true);
+        private_.param("recovery_auto_resume", auto_resume_, false);
+        private_.param("recovery_stable_hold", recovery_.stable_hold, 1.0);
+        private_.param("recovery_hover_speed", recovery_.speed_limit, 0.10);
+        private_.param("recovery_position_band", recovery_.position_band, 0.10);
+        private_.param("recovery_timeout", recovery_.timeout, 30.0);
+        private_.param("recovery_good_span", recovery_.good_span, 0.4);
+        private_.param("recovery_good_frames", recovery_.required_frames, 5);
+        private_.param("recovery_max_attempts", recovery_.max_attempts, 3);
+        private_.param("recovery_max_no_progress", recovery_.max_no_progress, 2);
+        private_.param("recovery_min_progress", recovery_.min_progress, 0.05);
+        double cmd_timeout=0.0;
+        if (execute_ && recovery_enabled_ &&
+            (!nh_.getParam("/px4ctrl/msg_timeout/cmd", cmd_timeout) ||
+             !std::isfinite(cmd_timeout) || cmd_timeout<=0))
+            throw std::runtime_error("Recovery requires PX4Ctrl cmd timeout parameter");
+        recovery_.release_wait=std::max(0.5, cmd_timeout)+0.5;
+        recovery_.max_frame_gap=plan_timeout_;
+        for (double x : {recovery_.stable_hold, recovery_.speed_limit,
+                         recovery_.position_band, recovery_.timeout,
+                         recovery_.good_span, recovery_.min_progress})
+            if (!std::isfinite(x) || x<=0) throw std::runtime_error("Invalid recovery parameter");
+        if (recovery_.required_frames<2 || recovery_.max_attempts<1 ||
+            recovery_.max_no_progress<1 || recovery_.speed_limit>hover_speed_ ||
+            recovery_.timeout<=recovery_.release_wait+recovery_.stable_hold+recovery_.good_span)
+            throw std::runtime_error("Inconsistent recovery bounds");
         std::string file, key;
         private_.param<std::string>("camera_extrinsic_config", file, "");
         private_.param<std::string>("camera_extrinsic_key", key, "body_T_cam0");
@@ -135,6 +170,16 @@ class YopoMincoNode {
                 "Another publisher exists or ROS master unavailable on /position_cmd");
         commands_ = nh_.advertise<quadrotor_msgs::PositionCommand>(output_topic_, 1);
         status_   = nh_.advertise<std_msgs::String>("/yopo_minco/status", 1, true);
+        recovery_status_ = nh_.advertise<std_msgs::String>("/yopo_minco/recovery_state", 1, true);
+        accepted_goal_ = nh_.advertise<geometry_msgs::PoseStamped>("/yopo_minco/accepted_goal", 1, true);
+        start_service_ = nh_.advertiseService("/yopo_minco/start_goal", &YopoMincoNode::startGoal, this);
+        resume_service_ = nh_.advertiseService("/yopo_minco/resume", &YopoMincoNode::resume, this);
+        fault_sub_ = nh_.subscribe("/kf_fusion/kf_fail", 1, &YopoMincoNode::faultCallback, this);
+        vins_fault_sub_ = nh_.subscribe("/vins_fusion/vins_fail", 1, &YopoMincoNode::faultCallback, this);
+        imu_watch_sub_ = nh_.subscribe("/imu_filter/data", 10, &YopoMincoNode::imuWatch, this);
+        rc_sub_ = nh_.subscribe("/mavros/rc/in", 1, &YopoMincoNode::rcCallback, this);
+        extended_sub_ = nh_.subscribe("/mavros/extended_state", 1, &YopoMincoNode::extendedCallback, this);
+        takeoff_land_sub_ = nh_.subscribe("/px4ctrl/takeoff_land", 1, &YopoMincoNode::takeoffLandCallback, this);
         path_     = nh_.advertise<geometry_msgs::PoseArray>("/yopo_minco/best_trajectory", 1);
         odom_sub_ = nh_.subscribe(
             odom, 1, &YopoMincoNode::odomCallback, this, ros::TransportHints().tcpNoDelay());
@@ -152,8 +197,8 @@ class YopoMincoNode {
             nh_.createWallTimer(ros::WallDuration(1.), &YopoMincoNode::publisherCheck, this);
         depth_spinner_ = std::make_unique<ros::AsyncSpinner>(1, &depth_queue_);
         publishStatus(
-            "IDLE: set world goal, then publish trajectory trigger; execute=" +
-            std::to_string(execute_));
+            "IDLE: use minco_goal console (world goal + start); execute=" +
+            std::to_string(execute_)+"; auto_resume="+std::to_string(auto_resume_));
         depth_spinner_->start();
     }
     ~YopoMincoNode() {
@@ -166,8 +211,12 @@ class YopoMincoNode {
         msg.data = s;
         status_.publish(msg);
         ROS_WARN_STREAM(s);
+        recovery_status_.publish(msg);
     }
     void halt(const std::string& why) {
+        recovery_.stop(why);
+        resume_requested_ = false;
+        have_goal_ = false;  // A later unrelated trigger cannot restart the old task.
         active_    = false;
         have_plan_ = false;
         ++generation_;
@@ -194,6 +243,18 @@ class YopoMincoNode {
         if (!ok && active_) halt("command publisher conflict/master unavailable");
     }
     bool inputsOK(Clock::time_point now, std::string* reason) const {
+        if (!latched_fault_.empty()) { *reason=latched_fault_; return false; }
+        if (recovery_enabled_ && (imu_received_==Clock::time_point{} ||
+            seconds(now,imu_received_)>sensor_timeout_ || imu_stamp_.isZero() ||
+            (ros::Time::now()-imu_stamp_).toSec() < -0.05 ||
+            (ros::Time::now()-imu_stamp_).toSec() > sensor_timeout_)) {
+            *reason="missing/stale monitored IMU"; return false;
+        }
+        if (execute_ && (!rc_allowed_ || seconds(now,rc_received_)>0.5 ||
+            seconds(now,extended_received_)>2.0 ||
+            extended_.landed_state!=mavros_msgs::ExtendedState::LANDED_STATE_IN_AIR)) {
+            *reason="execution requires fresh neutral RC command mode and IN_AIR"; return false;
+        }
         if (!have_odom_ || !have_depth_ || seconds(now, odom_received_) > sensor_timeout_ ||
             seconds(now, depth_received_) > sensor_timeout_) {
             *reason = "missing/stale odometry or depth";
@@ -243,75 +304,151 @@ class YopoMincoNode {
         std::lock_guard<std::mutex> lock(mutex_);
         state_          = *msg;
         state_received_ = Clock::now();
+        if (execute_ && active_ && (!msg->connected || !msg->armed || msg->mode!="OFFBOARD"))
+            halt("flight state lost; explicit new goal required");
     }
     void stopCallback(const std_msgs::Empty::ConstPtr&) {
         std::lock_guard<std::mutex> lock(mutex_);
         halt("user request");
     }
+    double steadyNow() const {
+        return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+    }
+    double measuredYaw() const {
+        const auto& q=odom_.pose.pose.orientation;
+        return std::atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z));
+    }
+    void faultCallback(const std_msgs::Bool::ConstPtr& msg) {
+        if (!msg->data) return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        latched_fault_="localization failure latched; restart after diagnosis";
+        if (active_) halt(latched_fault_);
+    }
+    void imuWatch(const sensor_msgs::Imu::ConstPtr& msg) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // KF output mixes measurement stamps; monitor upstream IMU instead.
+        if (!imu_stamp_.isZero() && (imu_stamp_-msg->header.stamp).toSec()>0.001) {
+            latched_fault_="IMU timestamp moved backwards; restart after diagnosis";
+            if (active_) halt(latched_fault_);
+        }
+        if (msg->header.stamp>imu_stamp_) imu_stamp_=msg->header.stamp;
+        imu_received_=Clock::now();
+    }
+    void rcCallback(const mavros_msgs::RCIn::ConstPtr& msg) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        rc_received_=Clock::now();
+        rc_allowed_=msg->channels.size()>=8;
+        if (rc_allowed_) {
+            rc_allowed_=msg->channels[4]>1750 && msg->channels[5]>1750;
+            for (int i=0;i<4;++i)
+                rc_allowed_=rc_allowed_ && std::abs(int(msg->channels[i])-1500)<=125;
+        }
+        if (execute_ && active_ && !rc_allowed_) halt("RC takeover; explicit new goal required");
+    }
+    void extendedCallback(const mavros_msgs::ExtendedState::ConstPtr& msg) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        extended_=*msg; extended_received_=Clock::now();
+        if (execute_ && active_ && msg->landed_state!=mavros_msgs::ExtendedState::LANDED_STATE_IN_AIR)
+            halt("vehicle is not IN_AIR");
+    }
+    void takeoffLandCallback(const quadrotor_msgs::TakeoffLand::ConstPtr&) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (active_) halt("takeoff/landing request; task cancelled");
+    }
+    bool startTask(std::string* detail) {  // Caller holds mutex_.
+        if (active_) { *detail="task busy; stop it explicitly before a new goal"; return false; }
+        auto now=Clock::now();
+        if (!have_goal_) { *detail="no goal"; return false; }
+        if (!inputsOK(now,detail)) return false;
+        const auto p=position(); const double distance=(goal_-p).norm();
+        std::ostringstream info;
+        info << "position=[" << p.transpose() << "] goal=[" << goal_.transpose()
+             << "] distance=" << distance << " allowed=[" << goal_min_ << "," << goal_max_
+             << "] speed=" << velocity().norm();
+        if (distance<goal_min_ || distance>goal_max_ || p.z()<config_.min_height ||
+            p.z()>config_.max_height || goal_.z()<config_.min_height ||
+            goal_.z()>config_.max_height || std::abs(goal_.z()-p.z())>config_.height_band ||
+            velocity().norm()>hover_speed_) {
+            *detail="trigger limits rejected: "+info.str(); return false;
+        }
+        origin_=p; active_=true; have_plan_=false; start_time_=now;
+        arrival_since_=Clock::time_point{}; ++generation_;
+        recovery_.start(distance); resume_requested_=false;
+        last_yaw_=measuredYaw(); last_yaw_rate_=0; last_control_=now;
+        geometry_msgs::PoseStamped accepted;
+        accepted.header.stamp=ros::Time::now(); accepted.header.frame_id="world";
+        accepted.pose.position.x=goal_.x(); accepted.pose.position.y=goal_.y();
+        accepted.pose.position.z=goal_.z(); accepted.pose.orientation.w=1;
+        accepted_goal_.publish(accepted);
+        *detail="ACTIVE: "+info.str()+"; waiting for a fresh plan";
+        publishStatus(*detail); return true;
+    }
+    bool startGoal(StartGoal::Request& req, StartGoal::Response& res) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        Eigen::Vector3d g(req.goal.pose.position.x,req.goal.pose.position.y,req.goal.pose.position.z);
+        const double age=(ros::Time::now()-req.goal.header.stamp).toSec();
+        if (active_ || req.goal.header.frame_id!="world" || !g.allFinite() ||
+            req.goal.header.stamp.isZero() || age < -0.05 || age>1.0) {
+            res.success=false; res.message="busy or invalid/stale world goal; nothing started";
+            return true;
+        }
+        // Selection and activation are atomic: no stale goal/trigger race.
+        goal_=g; have_goal_=true; res.success=startTask(&res.message);
+        if (!res.success) { have_goal_=false; ROS_WARN_STREAM(res.message); }
+        return true;
+    }
     void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (active_) {
-            ROS_WARN("Stop current task before setting another goal");
-            return;
+        if (active_) { ROS_WARN("Stop current task before setting another goal"); return; }
+        Eigen::Vector3d g(msg->pose.position.x,msg->pose.position.y,msg->pose.position.z);
+        if (msg->header.frame_id!="world" || !g.allFinite()) {
+            ROS_WARN("Goal rejected: finite world-frame position required"); return;
         }
-        Eigen::Vector3d g(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
-        if (msg->header.frame_id != "world" || !g.allFinite()) {
-            ROS_WARN("Goal rejected: finite world-frame position required");
-            return;
-        }
-        goal_      = g;
-        have_goal_ = true;
+        goal_=g; have_goal_=true;
         publishStatus("GOAL_SET: waiting for explicit trajectory trigger");
     }
     void triggerCallback(const geometry_msgs::PoseStamped::ConstPtr&) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (active_) return;
+        if (active_) return; // Triggers cannot bypass recovery readiness.
         std::string reason;
-        auto now = Clock::now();
-        if (!have_goal_ || !inputsOK(now, &reason)) {
-            ROS_WARN_STREAM("Trigger rejected: " << (have_goal_ ? reason : "no goal"));
-            return;
+        if (!startTask(&reason)) ROS_WARN_STREAM("Trigger rejected: " << reason);
+    }
+    bool resume(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::string reason;
+        if (!active_ || !recovery_.freshReady(steadyNow()) || !inputsOK(Clock::now(),&reason)) {
+            res.success=false; res.message="not fresh READY or inputs invalid: "+reason; return true;
         }
-        auto p          = position();
-        double distance = (goal_ - p).norm();
-        if (distance < goal_min_ || distance > goal_max_ || p.z() < config_.min_height ||
-            p.z() > config_.max_height || goal_.z() < config_.min_height ||
-            goal_.z() > config_.max_height || std::abs(goal_.z() - p.z()) > config_.height_band ||
-            velocity().norm() > hover_speed_) {
-            std::string failed;
-            if (distance < goal_min_ || distance > goal_max_) failed += "distance ";
-            if (p.z() < config_.min_height || p.z() > config_.max_height)
-                failed += "height ";
-            if (goal_.z() < config_.min_height || goal_.z() > config_.max_height)
-                failed += "goal_height ";
-            if (std::abs(goal_.z() - p.z()) > config_.height_band)
-                failed += "height_diff ";
-            const double speed = velocity().norm();
-            if (speed > hover_speed_) failed += "speed ";
-            ROS_WARN_STREAM(
-                "Trigger rejected: " << failed
-                << "; distance=" << distance << " [" << goal_min_ << "," << goal_max_ << "]"
-                << "; height=" << p.z() << " goal_height=" << goal_.z()
-                << " [" << config_.min_height << "," << config_.max_height << "]"
-                << "; height_diff=" << std::abs(goal_.z() - p.z())
-                << " max=" << config_.height_band
-                << "; speed=" << speed << " max=" << hover_speed_);
-            return;
+        resume_requested_=true; resume_request_time_=Clock::now();
+        res.success=true; res.message="confirmation received; a NEW valid plan is still required";
+        return true;
+    }
+    bool recoveryUpdate() {  // Caller holds mutex_.
+        if (!recovery_.recovering()) return active_;
+        const auto p=position();
+        if (p.z()<config_.min_height || p.z()>config_.max_height ||
+            std::abs(p.z()-origin_.z())>config_.height_band ||
+            (p-origin_).head<2>().norm()>config_.test_radius) {
+            halt("recovery left original task bounds"); return false;
         }
-        origin_        = p;
-        active_        = true;
-        have_plan_     = false;
-        start_time_    = now;
-        arrival_since_ = Clock::time_point{};
-        ++generation_;
-        last_yaw_ = std::atan2(
-            2 * (odom_.pose.pose.orientation.w * odom_.pose.pose.orientation.z +
-                 odom_.pose.pose.orientation.x * odom_.pose.pose.orientation.y),
-            1 - 2 * (std::pow(odom_.pose.pose.orientation.y, 2) +
-                     std::pow(odom_.pose.pose.orientation.z, 2)));
-        last_yaw_rate_ = 0.0;  // New trigger starts a fresh command stream.
-        last_control_ = now;
-        publishStatus("ACTIVE: waiting for a fresh MINCO plan");
+        const auto old=recovery_.phase; const auto revision=recovery_.revision;
+        recovery_.update(steadyNow(),{{p.x(),p.y(),p.z()}},velocity().norm());
+        if (recovery_.phase==RecoveryGate::Phase::STOPPED) { halt(recovery_.failure); return false; }
+        if (revision!=recovery_.revision) { ++generation_; resume_requested_=false; }
+        if (old!=recovery_.phase)
+            publishStatus(recovery_.phase==RecoveryGate::Phase::WAIT_HOVER ?
+                "WAIT_HOVER: hover stability lost; commands remain released" :
+                "HOVER_REPLAN: stable by timeout/speed/position; evaluating without commands");
+        return true;
+    }
+    void corridorFailure(const std::string& reason) {
+        if (!recovery_enabled_) { halt(reason); return; }
+        if (!recovery_.begin(steadyNow(),(goal_-position()).norm())) {
+            halt(recovery_.failure); return;
+        }
+        have_plan_=false; resume_requested_=false; ++generation_;
+        publishStatus("WAIT_HOVER: "+reason+"; commands released; attempt="+
+                      std::to_string(recovery_.attempts));
     }
     bool prepareDepth(const sensor_msgs::Image& msg, Depth* output) const {
         if (msg.width != unsigned(width_) || msg.height != unsigned(height_) || msg.is_bigendian)
@@ -360,6 +497,12 @@ class YopoMincoNode {
         uint64_t generation;
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            if (!depth_stamp_.isZero() && (depth_stamp_-msg->header.stamp).toSec()>0.001) {
+                latched_fault_="depth timestamp moved backwards; restart after diagnosis";
+                if (active_) halt(latched_fault_);
+                return;
+            }
+            if (!depth_stamp_.isZero() && msg->header.stamp<=depth_stamp_) return;
             have_depth_     = true;
             depth_stamp_    = msg->header.stamp;
             depth_received_ = started;
@@ -370,11 +513,13 @@ class YopoMincoNode {
                 halt(reason);
                 return;
             }
+            if (!recoveryUpdate()) return;
+            if (recovery_.phase==RecoveryGate::Phase::WAIT_HOVER) return;
             generation           = generation_;
             snapshot.head.row(0) = position().transpose();
             snapshot.head.row(1) = velocity().transpose();
             // The acceleration reference is retained as in Python; zero before first plan.
-            if (have_plan_) {
+            if (have_plan_ && !recovery_.recovering()) {
                 double t = seconds(started, plan_epoch_);
                 if (t >= plan_.trajectory.duration() || t > plan_timeout_) {
                     halt("old plan expired before replanning");
@@ -413,10 +558,40 @@ class YopoMincoNode {
                 halt("planning latency exceeded budget");
                 return;
             }
-            if (!ok) {
-                halt(error);
-                return;
-            }
+            const bool corridor_rejected=error.rfind("no candidate passes predicted corridor threshold",0)==0;
+            if (!ok && !corridor_rejected) { halt(error); return; }
+            std::string input_error;
+            if (!inputsOK(finished, &input_error)) { halt(input_error); return; }
+            if (!recoveryUpdate() || generation!=generation_) return;
+            if (recovery_.recovering()) {
+                const auto old=recovery_.phase;
+                const auto revision=recovery_.revision;
+                recovery_.candidate(steadyNow(),msg->header.stamp.toSec(),ok);
+                if (revision!=recovery_.revision) resume_requested_=false;
+                if (!ok) {
+                    ROS_WARN_STREAM_THROTTLE(1.0, "HOVER_REPLAN: " << error);
+                    resume_requested_=false;
+                    if (old==RecoveryGate::Phase::READY)
+                        publishStatus("HOVER_REPLAN: candidate failed; confirmation revoked; "+error);
+                    return;
+                }
+                publishPath(candidate);
+                ROS_INFO_THROTTLE(1.0, "Recovery passing frames=%d, predicted mu=%.4f",
+                                  recovery_.good_frames, candidate.corridor_mu);
+                if (recovery_.phase==RecoveryGate::Phase::READY && old!=RecoveryGate::Phase::READY)
+                    publishStatus("READY: consecutive fresh plans passed; auto_resume="+
+                                  std::to_string(auto_resume_));
+                const bool confirmed=resume_requested_ && seconds(finished,resume_request_time_)<=1.0;
+                if (!recovery_.freshReady(steadyNow()) || (!auto_resume_ && !confirmed)) return;
+                const auto planned_now=candidate.trajectory.evaluate(seconds(finished,started),0);
+                if ((planned_now-position()).norm()>std::min(0.15,tracking_error_)) {
+                    recovery_.candidate(steadyNow(),msg->header.stamp.toSec(),false);
+                    resume_requested_=false; return;
+                }
+                recovery_.resumed(); resume_requested_=false;
+                last_yaw_=measuredYaw(); last_yaw_rate_=0; last_control_=finished;
+                publishStatus("RESUME: fresh plan from measured hover state; original goal/bounds retained");
+            } else if (!ok) { corridorFailure(error); return; }
             if (!inputsOK(finished, &error)) {
                 halt(error);
                 return;
@@ -429,6 +604,9 @@ class YopoMincoNode {
             1., "MINCO plan %.2f ms, action=%d, duration=%.3f s, score=%.4f, predicted mu=%.4f",
             seconds(finished, started) * 1000, candidate.action, candidate.trajectory.duration(),
             candidate.score, candidate.corridor_mu);
+        publishPath(candidate);
+    }
+    void publishPath(const Plan& candidate) {
         if (visualize_ && path_.getNumSubscribers()) {
             geometry_msgs::PoseArray path;
             path.header.frame_id = "world";
@@ -462,6 +640,7 @@ class YopoMincoNode {
             }
         } else
             arrival_since_ = Clock::time_point{};
+        if (recovery_.recovering()) { recoveryUpdate(); return; }
         if (!have_plan_) {
             if (seconds(now, start_time_) > plan_timeout_) halt("first plan timeout");
             return;
@@ -509,7 +688,15 @@ class YopoMincoNode {
     ros::NodeHandle nh_, private_, depth_nh_;
     ros::CallbackQueue depth_queue_;
     std::unique_ptr<ros::AsyncSpinner> depth_spinner_;
-    ros::Publisher commands_, status_, path_;
+    ros::Publisher commands_, status_, path_, recovery_status_, accepted_goal_;
+    ros::ServiceServer start_service_, resume_service_;
+    ros::Subscriber fault_sub_, vins_fault_sub_, imu_watch_sub_, rc_sub_, extended_sub_, takeoff_land_sub_;
+    RecoveryGate recovery_;
+    bool recovery_enabled_=true, auto_resume_=false, resume_requested_=false, rc_allowed_=false;
+    std::string latched_fault_;
+    ros::Time imu_stamp_;
+    Clock::time_point imu_received_{}, rc_received_{}, extended_received_{}, resume_request_time_{};
+    mavros_msgs::ExtendedState extended_;
     ros::Subscriber odom_sub_, depth_sub_, state_sub_, goal_sub_, trigger_sub_, stop_sub_;
     ros::WallTimer timer_, publisher_timer_;
     std::mutex mutex_;
