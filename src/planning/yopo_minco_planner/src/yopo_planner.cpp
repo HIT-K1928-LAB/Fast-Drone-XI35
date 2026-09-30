@@ -144,7 +144,7 @@ bool YopoPlanner::plan(
     double score = -std::numeric_limits<double>::infinity(), chosen_mu = 0;
     // 计算安全裕度并排除不安全的
     const double threshold = 1 - std::exp(-c_.safe_radius / c_.radius_lambda);
-    double best_mu = -std::numeric_limits<double>::infinity();
+    double best_mu         = -std::numeric_limits<double>::infinity();
     for (int i = 0; i < 15; ++i) {
         double mu = std::numeric_limits<double>::infinity();
         for (int k = 0; k < 10; ++k)
@@ -193,14 +193,57 @@ bool YopoPlanner::plan(
     result->corridor_mu = chosen_mu;
     return true;
 }
-// 生成无人机的 yaw（航向角）和 yaw 角速度，让机头平滑地朝向“飞行方向 + 目标方向”
+// Heading uses horizontal goal direction at low speed. Velocity contributes only
+// in the goal-facing hemisphere, preventing cancellation for opposite vectors.
 double YopoPlanner::wrap(double x) { return std::atan2(std::sin(x), std::cos(x)); }
 std::pair<double, double> YopoPlanner::yaw(
-    const Eigen::Vector3d& v, const Eigen::Vector3d& g, double last, double dt) {
-    double delta        = wrap(std::atan2(g.y(), g.x()) - last);
-    Eigen::Vector3d dir = v / (v.norm() + 1e-5) + 2 * std::abs(delta) / pi * g / (g.norm() + 1e-5);
-    double desired      = g.norm() > 0.5 ? std::atan2(dir.y(), dir.x()) : last;
-    double change       = std::clamp(wrap(desired - last), -0.5 * pi * dt, 0.5 * pi * dt);
-    return {wrap(last + change), change / dt};
+    const Eigen::Vector3d& v, const Eigen::Vector3d& g,
+    double last, double last_rate, double dt) {
+    constexpr double v_low = 0.10;
+    constexpr double v_high = 0.30;
+    constexpr double hold_distance = 0.25;
+    constexpr double full_yaw_distance = 0.50;
+    constexpr double rate_max = 20.0 * pi / 180.0;
+    constexpr double accel_max = 40.0 * pi / 180.0;
+    constexpr double yaw_gain = 2.0;  // 1/s; proportional approach to heading.
+
+    // Defensive fallback; the node rejects invalid odometry/scheduling first.
+    if (!v.allFinite() || !g.allFinite() || !std::isfinite(last) ||
+        !std::isfinite(last_rate) || !std::isfinite(dt) || dt <= 0.0) {
+        return {std::isfinite(last) ? wrap(last) : 0.0, 0.0};
+    }
+    const auto smoothstep = [](double x) {
+        x = std::clamp(x, 0.0, 1.0);
+        return x * x * (3.0 - 2.0 * x);
+    };
+    const Eigen::Vector2d velocity = v.head<2>();
+    const Eigen::Vector2d goal = g.head<2>();
+    const double speed = velocity.norm();
+    const double distance = goal.norm();
+    double requested_rate = 0.0;
+    if (distance > hold_distance) {
+        const Eigen::Vector2d goal_dir = goal / distance;
+        Eigen::Vector2d direction = goal_dir;
+        if (speed > v_low) {
+            const Eigen::Vector2d velocity_dir = velocity / speed;
+            const double alignment = goal_dir.dot(velocity_dir);
+            const double weight = smoothstep((speed - v_low) / (v_high - v_low)) *
+                                  smoothstep(alignment);
+            // Nonzero weight implies alignment > 0: these vectors cannot cancel.
+            direction = (1.0 - weight) * goal_dir + weight * velocity_dir;
+        }
+        const double desired = std::atan2(direction.y(), direction.x());
+        const double error = wrap(desired - last);
+        const double distance_weight =
+            smoothstep((distance - hold_distance) / (full_yaw_distance - hold_distance));
+        requested_rate =
+            distance_weight * std::clamp(yaw_gain * error, -rate_max, rate_max);
+    }
+    // Retain rate state across callbacks. Near the goal, brake to zero instead
+    // of snapping yaw_dot to zero. STOP still releases commands immediately.
+    const double previous_rate = std::clamp(last_rate, -rate_max, rate_max);
+    const double rate = std::clamp(
+        requested_rate, previous_rate - accel_max * dt, previous_rate + accel_max * dt);
+    return {wrap(last + rate * dt), rate};
 }
 }  // namespace yopo_minco_planner

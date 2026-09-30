@@ -309,6 +309,7 @@ class YopoMincoNode {
                  odom_.pose.pose.orientation.x * odom_.pose.pose.orientation.y),
             1 - 2 * (std::pow(odom_.pose.pose.orientation.y, 2) +
                      std::pow(odom_.pose.pose.orientation.z, 2)));
+        last_yaw_rate_ = 0.0;  // New trigger starts a fresh command stream.
         last_control_ = now;
         publishStatus("ACTIVE: waiting for a fresh MINCO plan");
     }
@@ -481,8 +482,9 @@ class YopoMincoNode {
             halt("reference tracking or motion limit");
             return;
         }
-        auto yaw      = YopoPlanner::yaw(v, goal_ - p, last_yaw_, dt);
+        auto yaw      = YopoPlanner::yaw(v, goal_ - p, last_yaw_, last_yaw_rate_, dt);
         last_yaw_     = yaw.first;
+        last_yaw_rate_ = yaw.second;
         last_control_ = now;
         quadrotor_msgs::PositionCommand cmd;
         cmd.header.stamp    = ros::Time::now();
@@ -531,7 +533,7 @@ class YopoMincoNode {
     double plan_hz_, ctrl_dt_, sensor_timeout_, state_timeout_, skew_, plan_timeout_,
         tracking_error_, goal_min_, goal_max_, arrive_distance_, arrive_speed_, arrive_hold_,
         hover_speed_;
-    double min_depth_, max_depth_, max_invalid_, last_yaw_ = 0;
+    double min_depth_, max_depth_, max_invalid_, last_yaw_ = 0, last_yaw_rate_ = 0;
 };
 }  // namespace yopo_minco_planner
 int main(int argc, char** argv) {

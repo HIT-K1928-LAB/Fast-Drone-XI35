@@ -37,7 +37,7 @@ class YopoPlanner {
   bool check(const Eigen::Vector3d& p,const Eigen::Vector3d& v,const Eigen::Vector3d& a,
              const Eigen::Vector3d& j,const Eigen::Vector3d& origin) const;
   static double wrap(double x);
-  static std::pair<double,double> yaw(const Eigen::Vector3d& velocity,const Eigen::Vector3d& goal,double last,double dt);
+  static std::pair<double,double> yaw(const Eigen::Vector3d& velocity,const Eigen::Vector3d& goal,double last,double last_rate,double dt);
  private:
   PlannerConfig c_;
   std::array<Eigen::Vector2d,15> angles_;
