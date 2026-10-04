@@ -34,3 +34,6 @@ libcustom_layernorm.so
 
 # Claude Code local settings.
 .claude/
+
+# Local isolated feature worktrees.
+.worktrees/
