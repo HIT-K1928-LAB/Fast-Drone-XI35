@@ -23,11 +23,13 @@ duration_min: 0.1
 radius_lambda: 2.0
 depth_width: 640
 depth_height: 480
-min_depth: 0.04
-max_depth: 20.0
+min_depth: 0.50
+# Trial sensor range; not a camera-wide reliability guarantee.
+sensor_reliable_max_depth: 10.0
+max_depth: 20.0  # Model normalization scale, independent of sensor range.
 # Predicted corridor threshold, NOT a measured physical-clearance guarantee.
 #safe 0.35→0.20
-safe_radius: 0.20 
+safe_radius: 0.10 
 max_speed: 0.8
 max_acceleration: 1.5
 max_jerk: 10.0
@@ -44,7 +46,7 @@ arrive_distance: 0.25
 arrive_speed: 0.15
 arrive_hold: 0.5
 sensor_timeout: 0.3
-state_timeout: 1.0
+state_timeout: 1.5
 max_sensor_skew: 0.1
 plan_timeout: 0.25
 max_tracking_error: 0.5

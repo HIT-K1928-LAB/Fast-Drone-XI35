@@ -1,3 +1,4 @@
+#include <geometry_msgs/PointStamped.h>
 #include "yopo_minco_planner/yopo_planner.h"
 #include "yopo_minco_planner/recovery_gate.h"
 #include "yopo_minco_planner/StartGoal.h"
@@ -42,7 +43,7 @@ class YopoMincoNode {
         private_.param("depth_replan_rate", plan_hz_, 10.);
         private_.param("ctrl_dt", ctrl_dt_, 0.02);
         private_.param("sensor_timeout", sensor_timeout_, 0.3);
-        private_.param("state_timeout", state_timeout_, 1.);
+        private_.param("state_timeout", state_timeout_, 1.5);
         private_.param("max_sensor_skew", skew_, 0.1);
         private_.param("plan_timeout", plan_timeout_, 0.25);
         private_.param("max_tracking_error", tracking_error_, 0.5);
@@ -54,6 +55,8 @@ class YopoMincoNode {
         private_.param("hover_speed", hover_speed_, 0.15);
         private_.param("min_depth", min_depth_, 0.04);
         private_.param("max_depth", max_depth_, 20.);
+        // Zero disables the independent sensor far cutoff (legacy behavior).
+        private_.param("sensor_reliable_max_depth", sensor_reliable_max_depth_, 0.);
         private_.param("max_invalid_depth_fraction", max_invalid_, 0.3);
         private_.param("depth_width", width_, 640);
         private_.param("depth_height", height_, 480);
@@ -86,6 +89,10 @@ class YopoMincoNode {
                                    hover_speed_, min_depth_,       max_depth_,      max_invalid_};
         for (double v : positive)
             if (!std::isfinite(v) || v <= 0) throw std::runtime_error("Invalid node parameter");
+        if (!std::isfinite(sensor_reliable_max_depth_) || sensor_reliable_max_depth_ < 0 ||
+            (sensor_reliable_max_depth_ > 0 &&
+             (sensor_reliable_max_depth_ <= min_depth_ || sensor_reliable_max_depth_ > max_depth_)))
+            throw std::runtime_error("Invalid sensor_reliable_max_depth bounds");
         if (width_ <= 0 || height_ <= 0 || width_ > 4096 || height_ > 4096 ||
             min_depth_ >= max_depth_ || max_invalid_ >= 1 || arrive_distance_ >= goal_min_ ||
             goal_min_ >= goal_max_ || ctrl_dt_ > 0.1 || plan_hz_ > 100 ||
@@ -180,6 +187,7 @@ class YopoMincoNode {
         rc_sub_ = nh_.subscribe("/mavros/rc/in", 1, &YopoMincoNode::rcCallback, this);
         extended_sub_ = nh_.subscribe("/mavros/extended_state", 1, &YopoMincoNode::extendedCallback, this);
         takeoff_land_sub_ = nh_.subscribe("/px4ctrl/takeoff_land", 1, &YopoMincoNode::takeoffLandCallback, this);
+        inner_point_ = nh_.advertise<geometry_msgs::PointStamped>("/yopo_minco/inner_point", 1);
         path_     = nh_.advertise<geometry_msgs::PoseArray>("/yopo_minco/best_trajectory", 1);
         odom_sub_ = nh_.subscribe(
             odom, 1, &YopoMincoNode::odomCallback, this, ros::TransportHints().tcpNoDelay());
@@ -469,7 +477,8 @@ class YopoMincoNode {
                     d = mm / 1000.f;
                 } else
                     std::memcpy(&d, src, 4);
-                if (!std::isfinite(d) || d < min_depth_) {
+                if (!std::isfinite(d) || d < min_depth_ ||
+                    (sensor_reliable_max_depth_ > 0 && d > sensor_reliable_max_depth_)) {
                     ++invalid;
                     d = 0;
                 }
@@ -481,6 +490,9 @@ class YopoMincoNode {
         mask = resized < min_depth_;
         cv::min(resized, max_depth_, normalized);
         normalized /= max_depth_;
+        // Masked fill is a numerical initializer, never measured free space.
+        if (sensor_reliable_max_depth_ > 0)
+            normalized.setTo(sensor_reliable_max_depth_ / max_depth_, mask);
         // Match Python np.uint8(depth*255) truncation, not OpenCV rounding.
         u8.create(96, 160, CV_8U);
         for (int y = 0; y < 96; ++y)
@@ -607,10 +619,18 @@ class YopoMincoNode {
         publishPath(candidate);
     }
     void publishPath(const Plan& candidate) {
+        // Exact world-frame junction of the selected MINCO trajectory, not a sample midpoint.
+        const auto stamp = ros::Time::now();
+        const auto inner = candidate.trajectory.evaluate(candidate.trajectory.firstDuration());
+        geometry_msgs::PointStamped point;
+        point.header.frame_id = "world";
+        point.header.stamp = stamp;
+        point.point.x = inner.x(); point.point.y = inner.y(); point.point.z = inner.z();
+        inner_point_.publish(point);  // Independent of visualize and RViz subscribers.
         if (visualize_ && path_.getNumSubscribers()) {
             geometry_msgs::PoseArray path;
             path.header.frame_id = "world";
-            path.header.stamp    = ros::Time::now();
+            path.header.stamp    = stamp;
             for (int i = 0; i <= 100; ++i) {
                 auto p = candidate.trajectory.evaluate(candidate.trajectory.duration() * i / 100.);
                 geometry_msgs::Pose pose;
@@ -703,6 +723,7 @@ class YopoMincoNode {
     PlannerConfig config_;
     std::unique_ptr<YopoPlanner> planner_;
     YopoEngine engine_;
+    ros::Publisher inner_point_;
     Eigen::Matrix3d rotation_bc_;
     Plan plan_;
     nav_msgs::Odometry odom_;
@@ -720,7 +741,7 @@ class YopoMincoNode {
     double plan_hz_, ctrl_dt_, sensor_timeout_, state_timeout_, skew_, plan_timeout_,
         tracking_error_, goal_min_, goal_max_, arrive_distance_, arrive_speed_, arrive_hold_,
         hover_speed_;
-    double min_depth_, max_depth_, max_invalid_, last_yaw_ = 0, last_yaw_rate_ = 0;
+    double min_depth_, max_depth_, sensor_reliable_max_depth_, max_invalid_, last_yaw_ = 0, last_yaw_rate_ = 0;
 };
 }  // namespace yopo_minco_planner
 int main(int argc, char** argv) {

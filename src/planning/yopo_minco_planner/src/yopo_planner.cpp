@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 namespace yopo_minco_planner {
 constexpr double pi = 3.14159265358979323846;
@@ -183,7 +184,35 @@ bool YopoPlanner::plan(
         if (!check(
                 traj.evaluate(t, 0), traj.evaluate(t, 1), traj.evaluate(t, 2), traj.evaluate(t, 3),
                 s.origin)) {
-            *reason = "selected trajectory exceeds sampled motion/spatial limits";
+            const auto p = traj.evaluate(t, 0);
+            const auto v = traj.evaluate(t, 1);
+            const auto a = traj.evaluate(t, 2);
+            const auto j = traj.evaluate(t, 3);
+            std::ostringstream detail;
+            detail.precision(9);
+            detail << "selected trajectory exceeds sampled motion/spatial limits"
+                   << "; action=" << best << "; sample=" << i << "/" << n
+                   << "; trajectory_t=" << t << " s; violations:";
+            if (!p.allFinite()) detail << " position_nonfinite=[" << p.transpose() << "]";
+            if (!v.allFinite()) detail << " velocity_nonfinite=[" << v.transpose() << "]";
+            if (!a.allFinite()) detail << " acceleration_nonfinite=[" << a.transpose() << "]";
+            if (!j.allFinite()) detail << " jerk_nonfinite=[" << j.transpose() << "]";
+            if (v.norm() > c_.max_speed)
+                detail << " speed=" << v.norm() << " > " << c_.max_speed << " m/s;";
+            if (a.norm() > c_.max_acceleration)
+                detail << " acceleration=" << a.norm() << " > " << c_.max_acceleration << " m/s^2;";
+            if (j.norm() > c_.max_jerk)
+                detail << " jerk=" << j.norm() << " > " << c_.max_jerk << " m/s^3;";
+            if (p.z() < c_.min_height || p.z() > c_.max_height)
+                detail << " height=" << p.z() << " outside [" << c_.min_height
+                       << "," << c_.max_height << "] m;";
+            if (std::abs(p.z() - s.origin.z()) > c_.height_band)
+                detail << " height_offset=" << std::abs(p.z() - s.origin.z())
+                       << " > " << c_.height_band << " m;";
+            if ((p - s.origin).head<2>().norm() > c_.test_radius)
+                detail << " horizontal_offset=" << (p - s.origin).head<2>().norm()
+                       << " > " << c_.test_radius << " m;";
+            *reason = detail.str();
             return false;
         }
     }

@@ -10,6 +10,7 @@ class MincoSolver {
              const Eigen::Vector3d& inner, const Eigen::Vector2d& durations);
   Eigen::Vector3d evaluate(double t, int derivative = 0) const;
   double duration() const { return durations_.sum(); }
+  double firstDuration() const { return durations_[0]; }
   bool valid() const { return valid_; }
   const Eigen::Matrix<double,12,3>& coefficients() const { return coefficients_; }
  private:
