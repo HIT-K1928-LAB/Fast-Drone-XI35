@@ -232,7 +232,7 @@ class YoloTrtNode {
         pnh_.param<bool>("enable_lidar_target_tracking", enable_lidar_target_tracking_, false);
         pnh_.param<std::string>(
             "lidar_cloud_topic", lidar_cloud_topic_,
-            "/cloud_undistorted_body_world");
+            "/cloud_registered");
         pnh_.param<double>("lidar_min_range", lidar_tracker_config_.min_range, 0.45);
         pnh_.param<double>("lidar_max_range", lidar_tracker_config_.max_range, 18.0);
         pnh_.param<double>(
@@ -2190,7 +2190,7 @@ class YoloTrtNode {
     std::string tracked_odom_topic_;
     std::string tracker_status_topic_;
     std::string planner_goal_topic_;
-    std::string lidar_cloud_topic_ = "/cloud_undistorted_body_world";
+    std::string lidar_cloud_topic_ = "/cloud_registered";
     std::string frame_id_;
     std::string global_frame_id_;
     float conf_threshold_    = 0.25f;

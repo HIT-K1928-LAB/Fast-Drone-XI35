@@ -72,7 +72,7 @@
   <arg name="track_initial_position_std" default="0.15" />
   <arg name="track_initial_velocity_std" default="1.0" />
   <arg name="enable_lidar_target_tracking" default="false" />
-  <arg name="lidar_cloud_topic" default="/cloud_undistorted_body_world" />
+  <arg name="lidar_cloud_topic" default="/cloud_registered" />
   <arg name="lidar_min_range" default="0.45" />
   <arg name="lidar_max_range" default="18.0" />
   <arg name="lidar_self_exclusion_radius" default="0.65" />

@@ -117,9 +117,9 @@ from the original training repo before using detections for any flight task.
 The `orin-lidar-01` flight profile enables a LiDAR-primary tracking path. Its
 data flow is:
 
-1. FAST-LIVO publishes one complete motion-compensated scan on
-   `/cloud_undistorted_body_world`. The points use the same FCU-aligned local
-   world convention as the flight odometry.
+1. FAST-LIVO publishes its normal downsampled scan on `/cloud_registered`.
+   The points use the same FCU-aligned local world convention as the flight
+   odometry.
 2. The detector builds a persistent voxel background, removes static cells,
    and groups the remaining points with 26-connected voxel clustering.
 3. A YOLO box is projected through the calibrated camera transform and only
@@ -130,24 +130,15 @@ data flow is:
    is temporarily absent. If LiDAR itself is lost or covariance grows past its
    limit, identity is cleared and YOLO must confirm a cluster again.
 
-FAST-LIVO controls the dense stream independently of its normal RViz/map
-publication:
-
-```yaml
-publish:
-  dense_undistorted_body_world_en: true
-```
-
-When this option is false—or when the topic has no subscriber—FAST-LIVO skips
-the additional cloud transformation and copy. The existing
-`/cloud_registered`, `/cloud_registered_body_world`, mapping, odometry and PCD
-saving paths are unchanged.
+The detector consumes the existing downsampled mapping cloud, so FAST-LIVO no
+longer performs a second dense-cloud conversion or publishes a duplicate
+aligned-cloud topic.
 
 Before a propeller-on test, verify the chain on the ground:
 
 ```bash
-rostopic hz /cloud_undistorted_body_world
-rostopic echo -n 1 /cloud_undistorted_body_world/header
+rostopic hz /cloud_registered
+rostopic echo -n 1 /cloud_registered/header
 rostopic echo /yolo_trt/target_status
 rostopic echo /yolo_trt/tracked_target
 ```
