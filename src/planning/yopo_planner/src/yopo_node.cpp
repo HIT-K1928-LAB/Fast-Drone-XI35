@@ -6,6 +6,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <nav_msgs/Odometry.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -14,13 +15,17 @@
 #include <opencv2/photo.hpp>
 #endif
 #include "yopo_planner/YopoLog.h"
+#include "yopo_planner/dynamic_target_safety.h"
 #include "yopo_planner/yopo_engine.h"
 #include "yopo_planner/yopo_planner.h"
+#include <px4ctrl/FsmStatus.h>
 #include <quadrotor_msgs/PositionCommand.h>
 #include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <std_msgs/Header.h>
+#include <std_msgs/String.h>
 #include <vector>
 
 namespace yopo_planner {
@@ -39,13 +44,147 @@ class YopoPlannerNode {
         pnh_.param("radio_range", params.radio_range, params.radio_range);
         pnh_.param("ctrl_dt", params.ctrl_dt, params.ctrl_dt);
         pnh_.param("arrive_distance", params.arrive_distance, params.arrive_distance);
-        pnh_.param("min_depth", params.min_depth, params.min_depth);
-        pnh_.param("max_depth", params.max_depth, params.max_depth);
+        pnh_.param("terminal_approach_enabled", params.terminal_approach_enabled,
+                   params.terminal_approach_enabled);
+        pnh_.param("terminal_brake_accel", params.terminal_brake_accel,
+                   params.terminal_brake_accel);
+        pnh_.param("terminal_brake_margin", params.terminal_brake_margin,
+                   params.terminal_brake_margin);
+        pnh_.param("terminal_position_tolerance", params.terminal_position_tolerance,
+                   params.terminal_position_tolerance);
+        pnh_.param("terminal_speed_tolerance", params.terminal_speed_tolerance,
+                   params.terminal_speed_tolerance);
+        pnh_.param("terminal_stable_time", params.terminal_stable_time,
+                   params.terminal_stable_time);
+        pnh_.param("arrival_yaw_rate", params.arrival_yaw_rate, params.arrival_yaw_rate);
+        pnh_.param(
+            "arrival_yaw_min_distance", params.arrival_yaw_min_distance,
+            params.arrival_yaw_min_distance);
+        pnh_.param(
+            "dynamic_target_yaw_rate", params.dynamic_target_yaw_rate,
+            params.dynamic_target_yaw_rate);
+        pnh_.param(
+            "dynamic_target_yaw_accel", params.dynamic_target_yaw_accel,
+            params.dynamic_target_yaw_accel);
+        pnh_.param(
+            "dynamic_target_yaw_deadband_deg", params.dynamic_target_yaw_deadband_deg,
+            params.dynamic_target_yaw_deadband_deg);
+        pnh_.param(
+            "dynamic_target_standoff_distance", params.dynamic_target_standoff_distance,
+            params.dynamic_target_standoff_distance);
+        pnh_.param(
+            "dynamic_target_standoff_hysteresis", params.dynamic_target_standoff_hysteresis,
+            params.dynamic_target_standoff_hysteresis);
+        pnh_.param(
+            "dynamic_target_min_speed_scale", params.dynamic_target_min_speed_scale,
+            params.dynamic_target_min_speed_scale);
+        pnh_.param(
+            "dynamic_target_coast_slowdown_time", params.dynamic_target_coast_slowdown_time,
+            params.dynamic_target_coast_slowdown_time);
+        pnh_.param(
+            "dynamic_target_search_enabled", params.dynamic_target_search_enabled,
+            params.dynamic_target_search_enabled);
+        pnh_.param(
+            "dynamic_target_search_yaw_amplitude_deg",
+            params.dynamic_target_search_yaw_amplitude_deg,
+            params.dynamic_target_search_yaw_amplitude_deg);
+        pnh_.param(
+            "dynamic_target_search_yaw_rate", params.dynamic_target_search_yaw_rate,
+            params.dynamic_target_search_yaw_rate);
+        pnh_.param(
+            "goal_yaw_alignment_enabled", params.goal_yaw_alignment_enabled,
+            params.goal_yaw_alignment_enabled);
+        pnh_.param(
+            "goal_yaw_align_enter_deg", params.goal_yaw_align_enter_deg,
+            params.goal_yaw_align_enter_deg);
+        pnh_.param("goal_yaw_align_rate", params.goal_yaw_align_rate, params.goal_yaw_align_rate);
+        pnh_.param(
+            "goal_yaw_brake_speed_tolerance", params.goal_yaw_brake_speed_tolerance,
+            params.goal_yaw_brake_speed_tolerance);
+        pnh_.param(
+            "goal_yaw_brake_stable_time", params.goal_yaw_brake_stable_time,
+            params.goal_yaw_brake_stable_time);
+        pnh_.param(
+            "goal_yaw_align_min_distance", params.goal_yaw_align_min_distance,
+            params.goal_yaw_align_min_distance);
+        pnh_.param(
+            "sensor_min_depth", params.sensor_min_depth, params.sensor_min_depth);
+        pnh_.param(
+            "sensor_reliable_max_depth", params.sensor_reliable_max_depth,
+            params.sensor_reliable_max_depth);
+        pnh_.param("model_depth_max", params.model_depth_max, params.model_depth_max);
+        if (!(params.sensor_min_depth > 0.0) ||
+            !(params.sensor_reliable_max_depth > params.sensor_min_depth) ||
+            !(params.model_depth_max >= params.sensor_reliable_max_depth)) {
+            ROS_FATAL(
+                "Invalid depth ranges: require 0 < sensor_min_depth < "
+                "sensor_reliable_max_depth <= model_depth_max, got %.3f, %.3f, %.3f m.",
+                params.sensor_min_depth, params.sensor_reliable_max_depth,
+                params.model_depth_max);
+            ros::shutdown();
+            return;
+        }
+        if (params.goal_yaw_alignment_enabled &&
+            (!(params.goal_yaw_align_enter_deg > 0.0) ||
+             !(params.goal_yaw_align_enter_deg < 180.0) ||
+             !(params.goal_yaw_align_rate > 0.0) ||
+             !(params.goal_yaw_brake_speed_tolerance >= 0.0) ||
+             !(params.goal_yaw_brake_stable_time >= 0.0) ||
+             !(params.goal_yaw_align_min_distance >= 0.0))) {
+            ROS_FATAL(
+                "Invalid goal yaw alignment parameters: require 0 < enter < 180 deg, "
+                "positive yaw rate, and non-negative speed/time/distance thresholds.");
+            ros::shutdown();
+            return;
+        }
+        if (!(params.arrive_distance > 0.0) ||
+            !(params.terminal_brake_accel > 0.0) ||
+            !(params.terminal_brake_margin >= 0.0) ||
+            !(params.terminal_position_tolerance > 0.0) ||
+            !(params.terminal_speed_tolerance >= 0.0) ||
+            !(params.terminal_stable_time >= 0.0)) {
+            ROS_FATAL("Invalid YOPO terminal approach parameters.");
+            ros::shutdown();
+            return;
+        }
+        if (!(params.dynamic_target_yaw_rate > 0.0) ||
+            !(params.dynamic_target_yaw_accel > 0.0) ||
+            !(params.dynamic_target_yaw_deadband_deg >= 0.0) ||
+            !(params.dynamic_target_standoff_distance >= 0.0) ||
+            !(params.dynamic_target_standoff_hysteresis >= 0.0) ||
+            !(params.dynamic_target_min_speed_scale > 0.0) ||
+            !(params.dynamic_target_min_speed_scale <= 1.0) ||
+            !(params.dynamic_target_coast_slowdown_time > 0.0) ||
+            !(params.dynamic_target_search_yaw_amplitude_deg >= 0.0) ||
+            !(params.dynamic_target_search_yaw_amplitude_deg < 90.0) ||
+            !(params.dynamic_target_search_yaw_rate > 0.0)) {
+            ROS_FATAL("Invalid YOPO dynamic-target tracking parameters.");
+            ros::shutdown();
+            return;
+        }
         pnh_.param("verbose", verbose_, false);
         pnh_.param("visualize", visualize_, true);
+        pnh_.param("rotate_depth_180", rotate_depth_180_, false);
         pnh_.param("wait_for_traj_start_trigger", wait_for_traj_start_trigger_, false);
+        pnh_.param("require_explicit_goal", require_explicit_goal_, false);
+        pnh_.param("pause_with_fsm", pause_with_fsm_, false);
+        pnh_.param("fsm_status_timeout", fsm_status_timeout_, 0.5);
+        if (pause_with_fsm_ && fsm_status_timeout_ <= 0.0) {
+            ROS_FATAL("fsm_status_timeout must be positive when pause_with_fsm is enabled.");
+            ros::shutdown();
+            return;
+        }
         pnh_.param("depth_replan_rate", depth_replan_rate_, depth_replan_rate_);
         if (depth_replan_rate_ < 0.0) depth_replan_rate_ = 0.0;
+        pnh_.param("target_mask_enabled", target_mask_enabled_, true);
+        pnh_.param("target_mask_timeout", target_mask_timeout_, 0.25);
+        pnh_.param("target_mask_inpaint_radius", target_mask_inpaint_radius_, 3.0);
+        if (target_mask_enabled_ &&
+            (!(target_mask_timeout_ > 0.0) || !(target_mask_inpaint_radius_ > 0.0))) {
+            ROS_FATAL("target mask timeout and inpaint radius must be positive.");
+            ros::shutdown();
+            return;
+        }
 
         double goal_x = 50.0;
         double goal_y = 0.0;
@@ -55,7 +194,15 @@ class YopoPlannerNode {
         pnh_.param("goal_z", goal_z, goal_z);
 
         planner_.reset(new YopoPlanner(params));
-        planner_->setGoal(Eigen::Vector3d(goal_x, goal_y, goal_z));
+        if (!require_explicit_goal_) {
+            planner_->setGoal(Eigen::Vector3d(goal_x, goal_y, goal_z));
+            goal_received_ = true;
+        }
+        ROS_INFO(
+            "YOPO depth preprocessing: D455 valid range [%.2f, %.2f] m, "
+            "model normalization depth %.2f m, rotate_depth_180=%s.",
+            params.sensor_min_depth, params.sensor_reliable_max_depth,
+            params.model_depth_max, rotate_depth_180_ ? "true" : "false");
 
         YopoEngine::Config engine_config;
         pnh_.param<std::string>("onnx_file", engine_config.onnx_file, "");
@@ -77,9 +224,13 @@ class YopoPlannerNode {
         std::string odom_topic       = "/kf_fusion/kf_imu_odom";
         std::string depth_topic      = "/depth_image";
         std::string ctrl_topic       = "/so3_control/pos_cmd";
-        std::string goal_topic       = "/move_base_simple/goal";
+        std::string goal_topic       = "/planning/goal";
         std::string traj_start_topic = "/traj_start_trigger";
         std::string extrinsic_topic  = "/vins_fusion/extrinsic";
+        std::string fsm_status_topic = "/offboard_fsm/status";
+        std::string dynamic_target_topic = "/yolo_trt/tracked_target";
+        std::string dynamic_target_status_topic = "/yolo_trt/target_status";
+        std::string target_mask_topic = "/yolo_trt/tracked_target_mask";
         std::string camera_extrinsic_config;
         std::string camera_extrinsic_key = "body_T_cam0";
         bool use_config_camera_extrinsic = false;
@@ -89,6 +240,26 @@ class YopoPlannerNode {
         pnh_.param<std::string>("goal_topic", goal_topic, goal_topic);
         pnh_.param<std::string>("traj_start_topic", traj_start_topic, traj_start_topic);
         pnh_.param<std::string>("extrinsic_topic", extrinsic_topic, extrinsic_topic);
+        pnh_.param<std::string>("fsm_status_topic", fsm_status_topic, fsm_status_topic);
+        pnh_.param<std::string>(
+            "dynamic_target_topic", dynamic_target_topic, dynamic_target_topic);
+        pnh_.param<std::string>(
+            "dynamic_target_status_topic", dynamic_target_status_topic,
+            dynamic_target_status_topic);
+        pnh_.param<std::string>("target_mask_topic", target_mask_topic, target_mask_topic);
+        pnh_.param("dynamic_target_timeout", dynamic_target_timeout_, 0.8);
+        pnh_.param(
+            "dynamic_target_max_speed", dynamic_target_safety_config_.max_speed, 4.0);
+        pnh_.param(
+            "dynamic_target_max_range", dynamic_target_safety_config_.max_range, 18.0);
+        pnh_.param(
+            "dynamic_target_max_position_variance",
+            dynamic_target_safety_config_.max_position_variance, 0.50);
+        if (dynamic_target_timeout_ <= 0.0) {
+            ROS_FATAL("dynamic_target_timeout must be positive.");
+            ros::shutdown();
+            return;
+        }
         pnh_.param<std::string>(
             "camera_extrinsic_config", camera_extrinsic_config, camera_extrinsic_config);
         pnh_.param<std::string>("camera_extrinsic_key", camera_extrinsic_key, camera_extrinsic_key);
@@ -146,8 +317,23 @@ class YopoPlannerNode {
             depth_topic, 1, &YopoPlannerNode::depthCallback, this,
             ros::TransportHints().tcpNoDelay());
         goal_sub_ = nh_.subscribe(goal_topic, 1, &YopoPlannerNode::goalCallback, this);
+        dynamic_target_sub_ = nh_.subscribe(
+            dynamic_target_topic, 1, &YopoPlannerNode::dynamicTargetCallback, this,
+            ros::TransportHints().tcpNoDelay());
+        dynamic_target_status_sub_ = nh_.subscribe(
+            dynamic_target_status_topic, 5,
+            &YopoPlannerNode::dynamicTargetStatusCallback, this);
+        if (target_mask_enabled_) {
+            target_mask_sub_ = nh_.subscribe(
+                target_mask_topic, 2, &YopoPlannerNode::targetMaskCallback, this,
+                ros::TransportHints().tcpNoDelay());
+        }
         traj_start_sub_ =
             nh_.subscribe(traj_start_topic, 1, &YopoPlannerNode::trajStartCallback, this);
+        if (pause_with_fsm_) {
+            fsm_status_sub_ = nh_.subscribe(
+                fsm_status_topic, 5, &YopoPlannerNode::fsmStatusCallback, this);
+        }
         if (!use_parameter_camera_extrinsic && !use_config_camera_extrinsic) {
             extrinsic_sub_ = nh_.subscribe(
                 extrinsic_topic, 1, &YopoPlannerNode::extrinsicCallback, this,
@@ -162,8 +348,31 @@ class YopoPlannerNode {
                 "YOPO waiting for %s before publishing control commands.",
                 traj_start_topic.c_str());
         }
+        if (require_explicit_goal_) {
+            ROS_INFO("YOPO waits for an explicit goal before inference or control output.");
+        }
+        if (pause_with_fsm_) {
+            ROS_INFO("YOPO pauses and resynchronizes its reference with the OFFBOARD FSM lifecycle.");
+        }
         if (depth_replan_rate_ > 0.0) {
             ROS_INFO("YOPO depth replanning limited to %.2f Hz.", depth_replan_rate_);
+        }
+        ROS_INFO(
+            "YOPO dynamic tracking: target=%s status=%s timeout=%.2f s, "
+            "target-facing yaw rate=%.2f rad/s, coast speed floor=%.2f.",
+            dynamic_target_topic.c_str(), dynamic_target_status_topic.c_str(),
+            dynamic_target_timeout_, params.dynamic_target_yaw_rate,
+            params.dynamic_target_min_speed_scale);
+        if (target_mask_enabled_) {
+            ROS_INFO(
+                "YOPO target-depth masking enabled: topic=%s timeout=%.2f s radius=%.1f px.",
+                target_mask_topic.c_str(), target_mask_timeout_, target_mask_inpaint_radius_);
+        }
+        if (params.goal_yaw_alignment_enabled) {
+            ROS_INFO(
+                "YOPO goal yaw alignment enabled: forward sector +/-%.1f deg, "
+                "turn rate %.2f rad/s.",
+                params.goal_yaw_align_enter_deg, params.goal_yaw_align_rate);
         }
         if (planner_->requiresCameraExtrinsic() && !planner_->cameraExtrinsicReady()) {
             ROS_INFO(
@@ -190,6 +399,10 @@ class YopoPlannerNode {
     }
 
     void odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+        latest_vehicle_position_ = Eigen::Vector3d(
+            msg->pose.pose.position.x, msg->pose.pose.position.y,
+            msg->pose.pose.position.z);
+        has_vehicle_position_ = latest_vehicle_position_.allFinite();
         planner_->updateOdometry(*msg);
         ROS_INFO_THROTTLE(
             3.0, "YOPO odom position: x=%.3f y=%.3f z=%.3f", msg->pose.pose.position.x,
@@ -221,8 +434,28 @@ class YopoPlannerNode {
     void setOpticalToBodyExtrinsic(
         const Eigen::Matrix3d& rotation_body_optical,
         const Eigen::Vector3d& translation_body_optical) {
-        planner_->setCameraToBodyExtrinsic(rotation_body_optical * rotationOpticalYopo());
+        Eigen::Matrix3d rotation_body_input_optical = rotation_body_optical;
+        if (rotate_depth_180_) {
+            // Rotating the pixel image by 180 degrees creates a virtual upright
+            // optical frame: x_virtual=-x_physical, y_virtual=-y_physical,
+            // z_virtual=z_physical. Compose the same rotation into the calibrated
+            // physical-camera extrinsic so image pixels, state input and predicted
+            // trajectories continue to describe the same physical directions.
+            Eigen::Matrix3d rotation_physical_input = Eigen::Matrix3d::Identity();
+            rotation_physical_input(0, 0) = -1.0;
+            rotation_physical_input(1, 1) = -1.0;
+            rotation_body_input_optical = rotation_body_optical * rotation_physical_input;
+        }
+        planner_->setCameraToBodyExtrinsic(
+            rotation_body_input_optical * rotationOpticalYopo());
         translation_body_optical_ = translation_body_optical;
+        if (!depth_orientation_logged_) {
+            ROS_INFO_STREAM(
+                "YOPO effective input-optical-to-body rotation (rotate_depth_180="
+                << (rotate_depth_180_ ? "true" : "false") << "):\n"
+                << rotation_body_input_optical);
+            depth_orientation_logged_ = true;
+        }
     }
 
     bool loadCameraExtrinsicFromParams(
@@ -304,9 +537,125 @@ class YopoPlannerNode {
     void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
         planner_->setGoal(
             Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z));
+        goal_received_ = true;
         ROS_INFO(
             "YOPO new goal: %.2f %.2f %.2f", msg->pose.position.x, msg->pose.position.y,
             msg->pose.position.z);
+    }
+
+    void dynamicTargetCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+        const Eigen::Vector3d position(
+            msg->pose.pose.position.x, msg->pose.pose.position.y,
+            msg->pose.pose.position.z);
+        const Eigen::Vector3d velocity(
+            msg->twist.twist.linear.x, msg->twist.twist.linear.y,
+            msg->twist.twist.linear.z);
+        DynamicTargetSample safety_sample;
+        safety_sample.position = {{position.x(), position.y(), position.z()}};
+        safety_sample.velocity = {{velocity.x(), velocity.y(), velocity.z()}};
+        safety_sample.position_variance = {{
+            msg->pose.covariance[0], msg->pose.covariance[7],
+            msg->pose.covariance[14]}};
+        safety_sample.vehicle_position = {{
+            latest_vehicle_position_.x(), latest_vehicle_position_.y(),
+            latest_vehicle_position_.z()}};
+        safety_sample.tracker_status = tracker_status_;
+        const DynamicTargetRejectReason rejection = has_vehicle_position_
+            ? validateDynamicTarget(safety_sample, dynamic_target_safety_config_)
+            : DynamicTargetRejectReason::kNonFinite;
+        if (rejection != DynamicTargetRejectReason::kNone) {
+            ROS_ERROR_THROTTLE(
+                0.5, "YOPO rejected unsafe dynamic target: %s.",
+                dynamicTargetRejectReasonName(rejection));
+            triggerDynamicTargetLoss("dynamic target failed safety validation");
+            return;
+        }
+        if (!msg->header.stamp.isZero() && !last_dynamic_target_stamp_.isZero() &&
+            msg->header.stamp <= last_dynamic_target_stamp_) {
+            ROS_WARN_THROTTLE(1.0, "YOPO ignored out-of-order dynamic target.");
+            return;
+        }
+        planner_->setDynamicTargetTrackingScale(dynamicTargetTrackingScale());
+        if (!planner_->updateDynamicTarget(position, velocity)) return;
+
+        last_dynamic_target_stamp_ = msg->header.stamp;
+        last_dynamic_target_wall_ = ros::WallTime::now();
+        dynamic_target_seen_ = true;
+        dynamic_target_loss_latched_ = false;
+        goal_received_ = true;
+        ROS_INFO_THROTTLE(
+            1.0, "YOPO rolling target: p=(%.2f %.2f %.2f), v=(%.2f %.2f %.2f).",
+            position.x(), position.y(), position.z(), velocity.x(), velocity.y(), velocity.z());
+    }
+
+    void dynamicTargetStatusCallback(const std_msgs::String::ConstPtr& msg) {
+        const ros::WallTime now = ros::WallTime::now();
+        if (msg->data == "CONFIRMED") {
+            tracker_status_ = msg->data;
+            dynamic_target_coast_start_wall_ = ros::WallTime();
+            planner_->setDynamicTargetTrackingScale(1.0);
+            return;
+        }
+        if (msg->data == "COASTING") {
+            if (tracker_status_ != "COASTING" ||
+                dynamic_target_coast_start_wall_.isZero()) {
+                dynamic_target_coast_start_wall_ = now;
+                ROS_WARN("YOPO tracker COASTING: continue predictive replanning with slowdown.");
+            }
+            tracker_status_ = msg->data;
+            planner_->setDynamicTargetTrackingScale(dynamicTargetTrackingScale());
+            return;
+        }
+        tracker_status_ = msg->data;
+        if (msg->data == "LOST") {
+            triggerDynamicTargetLoss("tracker exceeded COASTING window and reported LOST");
+        } else {
+            triggerDynamicTargetLoss("tracker identity is not confirmed");
+        }
+    }
+
+    void targetMaskCallback(const sensor_msgs::Image::ConstPtr& msg) {
+        if (msg->encoding != sensor_msgs::image_encodings::MONO8 ||
+            msg->height == 0 || msg->width == 0 ||
+            msg->step < msg->width || msg->data.size() < msg->step * msg->height) {
+            ROS_WARN_THROTTLE(1.0, "YOPO rejected invalid target mask image.");
+            return;
+        }
+        cv::Mat view(
+            static_cast<int>(msg->height), static_cast<int>(msg->width), CV_8UC1,
+            const_cast<uint8_t*>(msg->data.data()), static_cast<size_t>(msg->step));
+        std::lock_guard<std::mutex> lock(target_mask_mutex_);
+        latest_target_mask_ = view.clone();
+        latest_target_mask_stamp_ = msg->header.stamp;
+    }
+
+    double dynamicTargetTrackingScale() const {
+        if (tracker_status_ != "COASTING" ||
+            dynamic_target_coast_start_wall_.isZero()) return 1.0;
+        const double elapsed =
+            (ros::WallTime::now() - dynamic_target_coast_start_wall_).toSec();
+        const double progress = std::max(
+            0.0, std::min(1.0,
+                          elapsed / planner_->params().dynamic_target_coast_slowdown_time));
+        const double floor = planner_->params().dynamic_target_min_speed_scale;
+        return 1.0 - progress * (1.0 - floor);
+    }
+
+    void triggerDynamicTargetLoss(const char* reason) {
+        if (!dynamic_target_seen_ || dynamic_target_loss_latched_) return;
+        if (planner_->handleDynamicTargetLost()) {
+            ROS_WARN("YOPO dynamic target hold: %s.", reason);
+        }
+        dynamic_target_loss_latched_ = true;
+    }
+
+    void checkDynamicTargetTimeout() {
+        if (!dynamic_target_seen_ || dynamic_target_loss_latched_ ||
+            last_dynamic_target_wall_.isZero()) return;
+        if ((ros::WallTime::now() - last_dynamic_target_wall_).toSec() >
+            dynamic_target_timeout_) {
+            triggerDynamicTargetLoss("tracked target timed out");
+        }
     }
 
     void trajStartCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
@@ -323,8 +672,47 @@ class YopoPlannerNode {
         control_enabled_ = true;
     }
 
+    void fsmStatusCallback(const px4ctrl::FsmStatus::ConstPtr& msg) {
+        last_fsm_status_wall_ = ros::WallTime::now();
+        const bool usable_state = msg->state == px4ctrl::FsmStatus::HOVER ||
+                                  msg->state == px4ctrl::FsmStatus::EXTERNAL;
+        const bool ready = msg->enabled && msg->connected && msg->armed &&
+                           msg->px4_mode == "OFFBOARD" && msg->odometry_fresh &&
+                           usable_state;
+        if (ready && !fsm_execution_allowed_) {
+            if (control_enabled_ && planner_->odomInitialized()) {
+                planner_->syncReferenceFromCurrentOdom();
+                ROS_WARN("YOPO resumed after FSM interruption; reference resynced to current odom.");
+            }
+        } else if (!ready && fsm_execution_allowed_) {
+            ROS_WARN("YOPO paused because OFFBOARD FSM is %s (odom_fresh=%s).",
+                     msg->state_name.c_str(), msg->odometry_fresh ? "true" : "false");
+        }
+        fsm_execution_allowed_ = ready;
+    }
+
+    bool fsmExecutionReady() {
+        if (!pause_with_fsm_) return true;
+        const bool fresh = !last_fsm_status_wall_.isZero() &&
+            (ros::WallTime::now() - last_fsm_status_wall_).toSec() <= fsm_status_timeout_;
+        if (!fresh && fsm_execution_allowed_) {
+            ROS_WARN("YOPO paused because OFFBOARD FSM status timed out.");
+            fsm_execution_allowed_ = false;
+        }
+        return fresh && fsm_execution_allowed_;
+    }
+
     void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
-        if (!planner_->odomInitialized()) return;
+        if (!planner_->odomInitialized() || !goal_received_ || !control_enabled_ ||
+            !fsmExecutionReady() || planner_->arrived() ||
+            (planner_->terminalApproachActive() &&
+             !planner_->dynamicLossHoldActive())) return;
+        if (planner_->dynamicTargetLost()) return;
+        if (planner_->goalAlignmentActive()) {
+            ROS_INFO_THROTTLE(
+                1.0, "YOPO pauses depth replanning while braking/turning toward new goal.");
+            return;
+        }
         if (planner_->requiresCameraExtrinsic() && !planner_->cameraExtrinsicReady()) {
             ROS_WARN_THROTTLE(1.0, "YOPO waiting for camera-to-body extrinsic.");
             return;
@@ -406,32 +794,60 @@ class YopoPlannerNode {
             return false;
         }
 
+        cv::Mat oriented_depth;
+        if (rotate_depth_180_) {
+            cv::rotate(depth_meters, oriented_depth, cv::ROTATE_180);
+        } else {
+            oriented_depth = depth_meters;
+        }
+
         cv::Mat resized;
         const auto& params = planner_->params();
-        if (depth_meters.rows != params.image_height || depth_meters.cols != params.image_width) {
+        if (oriented_depth.rows != params.image_height ||
+            oriented_depth.cols != params.image_width) {
             cv::resize(
-                depth_meters, resized, cv::Size(params.image_width, params.image_height), 0.0, 0.0,
+                oriented_depth, resized, cv::Size(params.image_width, params.image_height), 0.0, 0.0,
                 cv::INTER_NEAREST);
         } else {
-            resized = depth_meters;
+            resized = oriented_depth;
         }
 
         cv::Mat normalized(params.image_height, params.image_width, CV_32FC1);
         cv::Mat invalid_mask(params.image_height, params.image_width, CV_8UC1);
-        const float min_norm = static_cast<float>(params.min_depth / params.max_depth);
+        const float invalid_fill = static_cast<float>(
+            params.sensor_reliable_max_depth / params.model_depth_max);
+        size_t valid_count = 0;
         for (int r = 0; r < params.image_height; ++r) {
             const float* src = resized.ptr<float>(r);
             float* dst       = normalized.ptr<float>(r);
             uint8_t* mask    = invalid_mask.ptr<uint8_t>(r);
             for (int c = 0; c < params.image_width; ++c) {
-                float v            = src[c];
-                const bool invalid = std::isnan(v) || v < params.min_depth;
-                if (std::isnan(v)) v = 0.0f;
-                v = std::min(v, static_cast<float>(params.max_depth)) /
-                    static_cast<float>(params.max_depth);
-                dst[c]  = v;
-                mask[c] = (invalid || v < min_norm) ? 255 : 0;
+                const float v = src[c];
+                const bool valid =
+                    std::isfinite(v) && v >= params.sensor_min_depth &&
+                    v <= params.sensor_reliable_max_depth;
+                if (valid) {
+                    dst[c] = v / static_cast<float>(params.model_depth_max);
+                    mask[c] = 0;
+                    ++valid_count;
+                } else {
+                    // Use the farthest reliable sensor value as the fallback
+                    // if an invalid area cannot be filled from valid neighbours.
+                    // This avoids representing missing depth as a zero-distance
+                    // obstacle while keeping the network input in its trained scale.
+                    dst[c] = invalid_fill;
+                    mask[c] = 255;
+                }
             }
+        }
+
+        if (valid_count == 0) {
+            ROS_WARN_THROTTLE(
+                1.0,
+                "YOPO skipped depth frame: no samples in D455 reliable range "
+                "[%.2f, %.2f] m.",
+                params.sensor_min_depth, params.sensor_reliable_max_depth);
+            return false;
         }
 
         cv::Mat inpainted;
@@ -445,6 +861,43 @@ class YopoPlannerNode {
         inpainted = normalized.clone();
         fillInvalidDepth(invalid_mask, &inpainted);
 #endif
+
+        if (target_mask_enabled_) {
+            cv::Mat target_mask;
+            ros::Time target_mask_stamp;
+            {
+                std::lock_guard<std::mutex> lock(target_mask_mutex_);
+                target_mask = latest_target_mask_.clone();
+                target_mask_stamp = latest_target_mask_stamp_;
+            }
+            const double stamp_delta =
+                (!msg.header.stamp.isZero() && !target_mask_stamp.isZero())
+                    ? std::abs((msg.header.stamp - target_mask_stamp).toSec())
+                    : std::numeric_limits<double>::infinity();
+            if (!target_mask.empty() && stamp_delta <= target_mask_timeout_) {
+                cv::Mat resized_mask;
+                cv::resize(
+                    target_mask, resized_mask,
+                    cv::Size(params.image_width, params.image_height), 0.0, 0.0,
+                    cv::INTER_NEAREST);
+                if (cv::countNonZero(resized_mask) > 0) {
+#ifdef YOPO_HAVE_OPENCV_PHOTO
+                    cv::Mat source_u8;
+                    cv::Mat repaired_u8;
+                    inpainted.convertTo(source_u8, CV_8UC1, 255.0);
+                    cv::inpaint(
+                        source_u8, resized_mask, repaired_u8,
+                        target_mask_inpaint_radius_, cv::INPAINT_NS);
+                    repaired_u8.convertTo(inpainted, CV_32FC1, 1.0 / 255.0);
+#else
+                    fillInvalidDepth(resized_mask, &inpainted);
+#endif
+                    ROS_INFO_THROTTLE(
+                        1.0, "YOPO removed tracked target from network depth input (%d pixels).",
+                        cv::countNonZero(resized_mask));
+                }
+            }
+        }
 
         publishPreprocessedDepth(msg.header, inpainted);
 
@@ -528,7 +981,8 @@ class YopoPlannerNode {
     }
 
     void controlTimer(const ros::TimerEvent&) {
-        if (!control_enabled_) return;
+        checkDynamicTargetTimeout();
+        if (!control_enabled_ || !goal_received_ || !fsmExecutionReady()) return;
         if (planner_->requiresCameraExtrinsic() && !planner_->cameraExtrinsicReady()) {
             ROS_WARN_THROTTLE(
                 1.0, "YOPO holds control command until camera-to-body extrinsic is received.");
@@ -675,15 +1129,43 @@ class YopoPlannerNode {
     ros::Subscriber odom_sub_;
     ros::Subscriber depth_sub_;
     ros::Subscriber goal_sub_;
+    ros::Subscriber dynamic_target_sub_;
+    ros::Subscriber dynamic_target_status_sub_;
+    ros::Subscriber target_mask_sub_;
     ros::Subscriber traj_start_sub_;
+    ros::Subscriber fsm_status_sub_;
     ros::Subscriber extrinsic_sub_;
     ros::Timer ctrl_timer_;
 
     bool verbose_                             = false;
     bool visualize_                           = true;
+    bool rotate_depth_180_                    = false;
     bool wait_for_traj_start_trigger_         = false;
     bool control_enabled_                     = true;
+    bool require_explicit_goal_               = false;
+    bool goal_received_                       = false;
+    bool dynamic_target_seen_                 = false;
+    bool dynamic_target_loss_latched_         = false;
+    std::string tracker_status_                = "LOST";
+    ros::WallTime dynamic_target_coast_start_wall_;
+    double dynamic_target_timeout_            = 0.8;
+    DynamicTargetSafetyConfig dynamic_target_safety_config_;
+    Eigen::Vector3d latest_vehicle_position_ = Eigen::Vector3d::Zero();
+    bool has_vehicle_position_ = false;
+    bool target_mask_enabled_                  = true;
+    double target_mask_timeout_                = 0.25;
+    double target_mask_inpaint_radius_         = 3.0;
+    std::mutex target_mask_mutex_;
+    cv::Mat latest_target_mask_;
+    ros::Time latest_target_mask_stamp_;
+    ros::Time last_dynamic_target_stamp_;
+    ros::WallTime last_dynamic_target_wall_;
+    bool pause_with_fsm_                      = false;
+    bool fsm_execution_allowed_              = false;
+    double fsm_status_timeout_                = 0.5;
+    ros::WallTime last_fsm_status_wall_;
     bool extrinsic_ready_logged_              = false;
+    bool depth_orientation_logged_            = false;
     Eigen::Vector3d translation_body_optical_ = Eigen::Vector3d::Zero();
     bool has_last_depth_plan_time_            = false;
     Clock::time_point last_depth_plan_time_;

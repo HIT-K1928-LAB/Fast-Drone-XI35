@@ -11,7 +11,7 @@ from tf.transformations import quaternion_from_euler
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Publish an RViz-compatible 2D Nav Goal PoseStamped message."
+        description="Publish a 3D PoseStamped goal to the shared planner input."
     )
     parser.add_argument(
         "xyz",
@@ -32,7 +32,11 @@ def parse_args():
         help="Goal yaw in degrees, matching the orientation RViz would publish.",
     )
     parser.add_argument("--frame-id", default="world", help="Header frame_id.")
-    parser.add_argument("--topic", default="/move_base_simple/goal", help="Goal topic.")
+    parser.add_argument(
+        "--topic",
+        default="/planning/goal",
+        help="Shared goal topic used by YOLO, YOPO and EGO Planner.",
+    )
     parser.add_argument(
         "--repeat",
         type=int,

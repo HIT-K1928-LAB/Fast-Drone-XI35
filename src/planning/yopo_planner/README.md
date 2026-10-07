@@ -11,7 +11,9 @@ YOPO 节点参数集中放在 config 目录：
 - velocity：规划速度，第一次实机建议 0.5 到 1.0
 - ctrl_dt：控制指令发布步长
 - goal_x / goal_y / goal_z：默认目标点，也可以用 RViz 2D Nav Goal 在线更新
-- min_depth / max_depth：YOPO 深度输入裁剪范围
+- sensor_min_depth / sensor_reliable_max_depth：深度传感器的物理有效范围
+- model_depth_max：YOPO 模型归一化尺度，有效深度统一除以该值
+- rotate_depth_180：将倒置安装相机的深度图旋转 180°，并自动同步补偿外参
 - pitch_angle_deg：相机俯仰安装角补偿
 - plan_from_reference：是否从上一条参考轨迹继续规划
 
@@ -71,7 +73,7 @@ rosrun yopo_planner publish_nav_goal.py 5.0 1.0 2.0 --yaw 30 --frame-id world
 支持编码：32FC1 或 16UC1
 用途：深度图输入，预处理成 TensorRT 输入 depth[1,1,96,160]
 
-/move_base_simple/goal
+/planning/goal
 类型：geometry_msgs/PoseStamped
 用途：RViz 里 2D Nav Goal / goal point，或脚本发布三维目标点，更新 YOPO 目标点
 注意：YOPO 会读取 msg 的 x/y/z；RViz 2D Nav Goal 通常 z 为 0，实机建议用 publish_nav_goal.py 输入明确高度

@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "body_pose_extrinsic.h"
+#include "aligned_point_cloud.h"
 #include "image_patch_utils.h"
 #include "initial_heading_alignment.h"
 #include "output_path.h"
@@ -176,6 +177,64 @@ TEST(InitialHeadingAlignment, UsesFcuBodyAfterLivoxExtrinsic)
 
   EXPECT_NEAR(
       fast_livo::yawFromRotation(aligned_fcu_state.rotation), 0.0, 1e-12);
+}
+
+TEST(AlignedPointCloud, MatchesBodyOdometryWorldAndPreservesOtherFields)
+{
+  sensor_msgs::PointCloud2 cloud;
+  cloud.header.frame_id = "camera_init";
+  cloud.header.stamp.fromSec(12.5);
+  sensor_msgs::PointCloud2Modifier modifier(cloud);
+  modifier.setPointCloud2Fields(
+      4, "x", 1, sensor_msgs::PointField::FLOAT32,
+      "y", 1, sensor_msgs::PointField::FLOAT32,
+      "z", 1, sensor_msgs::PointField::FLOAT32,
+      "intensity", 1, sensor_msgs::PointField::FLOAT32);
+  modifier.resize(2);
+
+  sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
+  sensor_msgs::PointCloud2Iterator<float> y(cloud, "y");
+  sensor_msgs::PointCloud2Iterator<float> z(cloud, "z");
+  sensor_msgs::PointCloud2Iterator<float> intensity(cloud, "intensity");
+  *x = 2.0f; *y = 2.0f; *z = 3.0f; *intensity = 42.0f;
+  ++x; ++y; ++z; ++intensity;
+  *x = 1.0f; *y = 4.0f; *z = 4.0f; *intensity = 7.0f;
+
+  const Eigen::Matrix3d rotation =
+      Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+  const Eigen::Vector3d initial_body_position(1.0, 2.0, 3.0);
+  ASSERT_TRUE(fast_livo::alignWorldPointCloudInPlace(
+      cloud, rotation, initial_body_position));
+
+  sensor_msgs::PointCloud2ConstIterator<float> ax(cloud, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> ay(cloud, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> az(cloud, "z");
+  sensor_msgs::PointCloud2ConstIterator<float> ai(cloud, "intensity");
+  EXPECT_NEAR(*ax, 0.0, 1e-6);
+  EXPECT_NEAR(*ay, 1.0, 1e-6);
+  EXPECT_NEAR(*az, 0.0, 1e-6);
+  EXPECT_FLOAT_EQ(*ai, 42.0f);
+  ++ax; ++ay; ++az; ++ai;
+  EXPECT_NEAR(*ax, -2.0, 1e-6);
+  EXPECT_NEAR(*ay, 0.0, 1e-6);
+  EXPECT_NEAR(*az, 1.0, 1e-6);
+  EXPECT_FLOAT_EQ(*ai, 7.0f);
+  EXPECT_EQ(cloud.header.frame_id, "camera_init");
+  EXPECT_DOUBLE_EQ(cloud.header.stamp.toSec(), 12.5);
+
+  fast_livo::RigidBodyState raw_body;
+  raw_body.position = Eigen::Vector3d(2.0, 2.0, 3.0);
+  const auto aligned_body = fast_livo::alignWorldFrameAtInitialPosition(
+      raw_body, rotation, initial_body_position);
+  EXPECT_NEAR(aligned_body.position.x(), 0.0, 1e-12);
+  EXPECT_NEAR(aligned_body.position.y(), 1.0, 1e-12);
+}
+
+TEST(AlignedPointCloud, RejectsCloudWithoutFloat32XYZ)
+{
+  sensor_msgs::PointCloud2 cloud;
+  EXPECT_FALSE(fast_livo::alignWorldPointCloudInPlace(
+      cloud, Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero()));
 }
 
 TEST(PointCloudPublication, RejectsMessagesWithoutPoints)

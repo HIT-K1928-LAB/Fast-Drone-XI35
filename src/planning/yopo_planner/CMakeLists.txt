@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   geometry_msgs
   quadrotor_msgs
+  px4ctrl
 )
 
 add_message_files(
@@ -67,7 +68,7 @@ message(STATUS "TensorRT nvonnxparser: ${NVONNXPARSER_LIBRARY}")
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES yopo_planner_lib
-  CATKIN_DEPENDS message_runtime roscpp std_msgs sensor_msgs nav_msgs geometry_msgs quadrotor_msgs
+  CATKIN_DEPENDS message_runtime roscpp std_msgs sensor_msgs nav_msgs geometry_msgs quadrotor_msgs px4ctrl
 )
 
 include_directories(
@@ -102,6 +103,41 @@ target_link_libraries(yopo_planner_node
   ${catkin_LIBRARIES}
 )
 add_dependencies(yopo_planner_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(yopo_goal_yaw_alignment_test
+    test/test_goal_yaw_alignment.cpp
+  )
+  if(TARGET yopo_goal_yaw_alignment_test)
+    target_link_libraries(yopo_goal_yaw_alignment_test
+      yopo_planner_lib
+      ${catkin_LIBRARIES}
+    )
+    add_dependencies(
+      yopo_goal_yaw_alignment_test
+      ${${PROJECT_NAME}_EXPORTED_TARGETS}
+      ${catkin_EXPORTED_TARGETS}
+    )
+  endif()
+  catkin_add_gtest(yopo_terminal_approach_test test/test_terminal_approach.cpp)
+  if(TARGET yopo_terminal_approach_test)
+    target_link_libraries(yopo_terminal_approach_test yopo_planner_lib ${catkin_LIBRARIES})
+    add_dependencies(yopo_terminal_approach_test
+      ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+  endif()
+  catkin_add_gtest(yopo_dynamic_target_tracking_test test/test_dynamic_target_tracking.cpp)
+  if(TARGET yopo_dynamic_target_tracking_test)
+    target_link_libraries(yopo_dynamic_target_tracking_test yopo_planner_lib ${catkin_LIBRARIES})
+    add_dependencies(yopo_dynamic_target_tracking_test
+      ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+  endif()
+  catkin_add_gtest(yopo_dynamic_target_safety_test test/test_dynamic_target_safety.cpp)
+  if(TARGET yopo_dynamic_target_safety_test)
+    target_link_libraries(yopo_dynamic_target_safety_test ${catkin_LIBRARIES})
+    add_dependencies(yopo_dynamic_target_safety_test
+      ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+  endif()
+endif()
 
 catkin_install_python(PROGRAMS
   scripts/export_yopo_onnx.py

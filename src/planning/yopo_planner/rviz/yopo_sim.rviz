@@ -307,7 +307,7 @@ Visualization Manager:
     - Class: rviz/MoveCamera
     - Class: rviz/Select
     - Class: rviz/SetGoal
-      Topic: /move_base_simple/goal
+      Topic: /planning/goal
     - Class: rviz/PublishPoint
       Single click: true
       Topic: /clicked_point

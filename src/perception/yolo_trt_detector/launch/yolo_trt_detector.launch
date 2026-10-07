@@ -1,11 +1,18 @@
 <launch>
-  <arg name="engine_file" default="$(find yolo_trt_detector)/models/best_rgbd.engine" />
+  <arg name="engine_file" default="$(find yolo_trt_detector)/models/best_floatdepth.engine" />
   <arg name="image_topic" default="/camera/color/image_raw" />
   <arg name="depth_topic" default="/camera/aligned_depth_to_color/image_raw" />
   <arg name="camera_info_topic" default="/camera/color/camera_info" />
   <arg name="odom_topic" default="/kf_fusion/kf_imu_odom" />
   <arg name="extrinsic_topic" default="/vins_fusion/extrinsic" />
   <arg name="target_topic" default="yolo_trt/target_point" />
+  <arg name="target_mask_topic" default="/yolo_trt/tracked_target_mask" />
+  <!-- Optional PoseStamped bridge from a confirmed YOLO track into a planner. -->
+  <arg name="publish_planner_goal" default="false" />
+  <arg name="planner_goal_topic" default="/planning/goal" />
+  <arg name="planner_goal_publish_rate" default="10.0" />
+  <!-- 0 disables standoff conversion and publishes the tracked target itself. -->
+  <arg name="planner_goal_standoff_distance" default="0.0" />
   <arg name="frame_id" default="" />
   <arg name="global_frame_id" default="world" />
   <arg name="conf_threshold" default="0.25" />
@@ -34,6 +41,92 @@
   <arg name="camera_r22" default="0.0" />
   <arg name="output_world_frame" default="false" />
   <arg name="detect_hz" default="30" />
+  <arg name="enable_target_tracking" default="true" />
+  <arg name="raw_target_topic" default="yolo_trt/target_point_raw" />
+  <arg name="tracked_odom_topic" default="yolo_trt/tracked_target" />
+  <arg name="tracker_status_topic" default="yolo_trt/target_status" />
+  <arg name="tracked_target_publish_rate" default="10.0" />
+  <arg name="depth_roi_scale" default="0.35" />
+  <arg name="depth_min_samples" default="12" />
+  <arg name="depth_cluster_abs" default="0.25" />
+  <arg name="depth_cluster_rel" default="0.08" />
+  <arg name="depth_mad_max" default="0.25" />
+  <arg name="target_min_depth" default="0.25" />
+  <arg name="target_max_depth" default="15.0" />
+  <arg name="target_mask_expand_scale" default="1.20" />
+  <arg name="odom_buffer_duration" default="2.0" />
+  <arg name="odom_max_time_offset" default="0.10" />
+  <arg name="track_init_confidence" default="0.45" />
+  <arg name="track_update_confidence" default="0.25" />
+  <arg name="track_confirm_hits" default="3" />
+  <arg name="track_confirm_window" default="5" />
+  <arg name="track_gate_mahalanobis" default="11.34" />
+  <arg name="track_init_gate_distance" default="1.2" />
+  <arg name="track_coast_publish_time" default="0.50" />
+  <arg name="track_lost_time" default="0.80" />
+  <arg name="track_identity_memory_time" default="2.0" />
+  <arg name="track_reacquire_distance" default="1.5" />
+  <arg name="track_max_measurement_jump" default="1.0" />
+  <arg name="track_process_accel_std" default="1.5" />
+  <arg name="track_measurement_std" default="0.08" />
+  <arg name="track_initial_position_std" default="0.15" />
+  <arg name="track_initial_velocity_std" default="1.0" />
+  <arg name="enable_lidar_target_tracking" default="false" />
+  <arg name="lidar_cloud_topic" default="/cloud_undistorted_body_world" />
+  <arg name="lidar_min_range" default="0.45" />
+  <arg name="lidar_max_range" default="18.0" />
+  <arg name="lidar_self_exclusion_radius" default="0.65" />
+  <arg name="lidar_background_voxel_size" default="0.18" />
+  <arg name="lidar_background_confirm_frames" default="8" />
+  <arg name="lidar_background_forget_seconds" default="3.0" />
+  <arg name="lidar_cluster_voxel_size" default="0.22" />
+  <arg name="lidar_cluster_min_points" default="2" />
+  <arg name="lidar_cluster_max_points" default="1200" />
+  <arg name="lidar_cluster_max_extent" default="1.20" />
+  <arg name="lidar_cluster_max_diagonal" default="1.60" />
+  <arg name="lidar_track_gate_distance" default="1.00" />
+  <arg name="lidar_track_gate_max_distance" default="0.50" />
+  <arg name="lidar_association_min_score_separation" default="0.12" />
+  <arg name="lidar_track_protection_radius" default="0.75" />
+  <arg name="lidar_lost_time" default="2.0" />
+  <arg name="lidar_covariance_lost_threshold" default="2.25" />
+  <arg name="lidar_visual_confirmation_gate" default="1.25" />
+  <arg name="lidar_visual_confirm_hits" default="5" />
+  <arg name="lidar_visual_confirm_window" default="7" />
+  <arg name="lidar_visual_confirm_max_gap" default="0.25" />
+  <arg name="lidar_visual_tentative_gate" default="0.60" />
+  <arg name="lidar_visual_tentative_max_speed" default="2.0" />
+  <arg name="lidar_visual_acquire_max_range" default="8.0" />
+  <arg name="lidar_visual_max_age" default="1.0" />
+  <arg name="lidar_require_recent_visual_confirmation" default="true" />
+  <arg name="lidar_max_target_speed" default="4.0" />
+  <arg name="lidar_max_target_acceleration" default="8.0" />
+  <arg name="lidar_measurement_position_slack" default="0.25" />
+  <arg name="lidar_measurement_max_update_distance" default="0.45" />
+  <arg name="lidar_measurement_velocity_slack" default="0.8" />
+  <arg name="lidar_measurement_std" default="0.10" />
+  <arg name="lidar_smooth_model_accel_std" default="0.7" />
+  <arg name="lidar_maneuver_model_accel_std" default="3.0" />
+  <arg name="lidar_target_physical_size" default="0.55" />
+  <arg name="lidar_enforce_range_point_count" default="false" />
+  <arg name="lidar_point_density_at_1m" default="300.0" />
+  <arg name="lidar_point_count_min_ratio" default="0.15" />
+  <arg name="lidar_point_count_max_ratio" default="5.0" />
+  <arg name="lidar_visual_match_margin" default="0.15" />
+  <arg name="lidar_candidate_max_age" default="0.25" />
+  <arg name="target_class_id" default="0" />
+  <arg name="lidar_visual_max_center_distance" default="0.35" />
+  <arg name="lidar_visual_min_rank_separation" default="0.12" />
+  <arg name="lidar_require_single_detection_on_acquire" default="true" />
+  <arg name="lidar_frustum_cluster_radius" default="0.14" />
+  <arg name="lidar_frustum_min_points" default="3" />
+  <arg name="lidar_frustum_max_points" default="800" />
+  <arg name="lidar_frustum_max_extent" default="0.80" />
+  <arg name="lidar_frustum_max_diagonal" default="1.00" />
+  <arg name="lidar_frustum_max_center_distance" default="0.55" />
+  <arg name="lidar_frustum_min_rank_separation" default="0.15" />
+  <arg name="lidar_visual_filter_max_age" default="0.25" />
+  <arg name="lidar_visual_filter_margin" default="0.20" />
   <arg name="rviz" default="false" />
 
   <node pkg="yolo_trt_detector" type="yolo_trt_node" name="yolo_trt_node" output="screen">
@@ -44,6 +137,11 @@
     <param name="odom_topic" value="$(arg odom_topic)" />
     <param name="extrinsic_topic" value="$(arg extrinsic_topic)" />
     <param name="target_topic" value="$(arg target_topic)" />
+    <param name="target_mask_topic" value="$(arg target_mask_topic)" />
+    <param name="publish_planner_goal" value="$(arg publish_planner_goal)" />
+    <param name="planner_goal_topic" value="$(arg planner_goal_topic)" />
+    <param name="planner_goal_publish_rate" value="$(arg planner_goal_publish_rate)" />
+    <param name="planner_goal_standoff_distance" value="$(arg planner_goal_standoff_distance)" />
     <param name="frame_id" value="$(arg frame_id)" />
     <param name="global_frame_id" value="$(arg global_frame_id)" />
     <param name="conf_threshold" value="$(arg conf_threshold)" />
@@ -72,6 +170,92 @@
     <param name="camera_r22" value="$(arg camera_r22)" />
     <param name="output_world_frame" value="$(arg output_world_frame)" />
     <param name="detect_hz" value="$(arg detect_hz)" />
+    <param name="enable_target_tracking" value="$(arg enable_target_tracking)" />
+    <param name="raw_target_topic" value="$(arg raw_target_topic)" />
+    <param name="tracked_odom_topic" value="$(arg tracked_odom_topic)" />
+    <param name="tracker_status_topic" value="$(arg tracker_status_topic)" />
+    <param name="tracked_target_publish_rate" value="$(arg tracked_target_publish_rate)" />
+    <param name="depth_roi_scale" value="$(arg depth_roi_scale)" />
+    <param name="depth_min_samples" value="$(arg depth_min_samples)" />
+    <param name="depth_cluster_abs" value="$(arg depth_cluster_abs)" />
+    <param name="depth_cluster_rel" value="$(arg depth_cluster_rel)" />
+    <param name="depth_mad_max" value="$(arg depth_mad_max)" />
+    <param name="target_min_depth" value="$(arg target_min_depth)" />
+    <param name="target_max_depth" value="$(arg target_max_depth)" />
+    <param name="target_mask_expand_scale" value="$(arg target_mask_expand_scale)" />
+    <param name="odom_buffer_duration" value="$(arg odom_buffer_duration)" />
+    <param name="odom_max_time_offset" value="$(arg odom_max_time_offset)" />
+    <param name="track_init_confidence" value="$(arg track_init_confidence)" />
+    <param name="track_update_confidence" value="$(arg track_update_confidence)" />
+    <param name="track_confirm_hits" value="$(arg track_confirm_hits)" />
+    <param name="track_confirm_window" value="$(arg track_confirm_window)" />
+    <param name="track_gate_mahalanobis" value="$(arg track_gate_mahalanobis)" />
+    <param name="track_init_gate_distance" value="$(arg track_init_gate_distance)" />
+    <param name="track_coast_publish_time" value="$(arg track_coast_publish_time)" />
+    <param name="track_lost_time" value="$(arg track_lost_time)" />
+    <param name="track_identity_memory_time" value="$(arg track_identity_memory_time)" />
+    <param name="track_reacquire_distance" value="$(arg track_reacquire_distance)" />
+    <param name="track_max_measurement_jump" value="$(arg track_max_measurement_jump)" />
+    <param name="track_process_accel_std" value="$(arg track_process_accel_std)" />
+    <param name="track_measurement_std" value="$(arg track_measurement_std)" />
+    <param name="track_initial_position_std" value="$(arg track_initial_position_std)" />
+    <param name="track_initial_velocity_std" value="$(arg track_initial_velocity_std)" />
+    <param name="enable_lidar_target_tracking" value="$(arg enable_lidar_target_tracking)" />
+    <param name="lidar_cloud_topic" value="$(arg lidar_cloud_topic)" />
+    <param name="lidar_min_range" value="$(arg lidar_min_range)" />
+    <param name="lidar_max_range" value="$(arg lidar_max_range)" />
+    <param name="lidar_self_exclusion_radius" value="$(arg lidar_self_exclusion_radius)" />
+    <param name="lidar_background_voxel_size" value="$(arg lidar_background_voxel_size)" />
+    <param name="lidar_background_confirm_frames" value="$(arg lidar_background_confirm_frames)" />
+    <param name="lidar_background_forget_seconds" value="$(arg lidar_background_forget_seconds)" />
+    <param name="lidar_cluster_voxel_size" value="$(arg lidar_cluster_voxel_size)" />
+    <param name="lidar_cluster_min_points" value="$(arg lidar_cluster_min_points)" />
+    <param name="lidar_cluster_max_points" value="$(arg lidar_cluster_max_points)" />
+    <param name="lidar_cluster_max_extent" value="$(arg lidar_cluster_max_extent)" />
+    <param name="lidar_cluster_max_diagonal" value="$(arg lidar_cluster_max_diagonal)" />
+    <param name="lidar_track_gate_distance" value="$(arg lidar_track_gate_distance)" />
+    <param name="lidar_track_gate_max_distance" value="$(arg lidar_track_gate_max_distance)" />
+    <param name="lidar_association_min_score_separation" value="$(arg lidar_association_min_score_separation)" />
+    <param name="lidar_track_protection_radius" value="$(arg lidar_track_protection_radius)" />
+    <param name="lidar_lost_time" value="$(arg lidar_lost_time)" />
+    <param name="lidar_covariance_lost_threshold" value="$(arg lidar_covariance_lost_threshold)" />
+    <param name="lidar_visual_confirmation_gate" value="$(arg lidar_visual_confirmation_gate)" />
+    <param name="lidar_visual_confirm_hits" value="$(arg lidar_visual_confirm_hits)" />
+    <param name="lidar_visual_confirm_window" value="$(arg lidar_visual_confirm_window)" />
+    <param name="lidar_visual_confirm_max_gap" value="$(arg lidar_visual_confirm_max_gap)" />
+    <param name="lidar_visual_tentative_gate" value="$(arg lidar_visual_tentative_gate)" />
+    <param name="lidar_visual_tentative_max_speed" value="$(arg lidar_visual_tentative_max_speed)" />
+    <param name="lidar_visual_acquire_max_range" value="$(arg lidar_visual_acquire_max_range)" />
+    <param name="lidar_visual_max_age" value="$(arg lidar_visual_max_age)" />
+    <param name="lidar_require_recent_visual_confirmation" value="$(arg lidar_require_recent_visual_confirmation)" />
+    <param name="lidar_max_target_speed" value="$(arg lidar_max_target_speed)" />
+    <param name="lidar_max_target_acceleration" value="$(arg lidar_max_target_acceleration)" />
+    <param name="lidar_measurement_position_slack" value="$(arg lidar_measurement_position_slack)" />
+    <param name="lidar_measurement_max_update_distance" value="$(arg lidar_measurement_max_update_distance)" />
+    <param name="lidar_measurement_velocity_slack" value="$(arg lidar_measurement_velocity_slack)" />
+    <param name="lidar_measurement_std" value="$(arg lidar_measurement_std)" />
+    <param name="lidar_smooth_model_accel_std" value="$(arg lidar_smooth_model_accel_std)" />
+    <param name="lidar_maneuver_model_accel_std" value="$(arg lidar_maneuver_model_accel_std)" />
+    <param name="lidar_target_physical_size" value="$(arg lidar_target_physical_size)" />
+    <param name="lidar_enforce_range_point_count" value="$(arg lidar_enforce_range_point_count)" />
+    <param name="lidar_point_density_at_1m" value="$(arg lidar_point_density_at_1m)" />
+    <param name="lidar_point_count_min_ratio" value="$(arg lidar_point_count_min_ratio)" />
+    <param name="lidar_point_count_max_ratio" value="$(arg lidar_point_count_max_ratio)" />
+    <param name="lidar_visual_match_margin" value="$(arg lidar_visual_match_margin)" />
+    <param name="lidar_candidate_max_age" value="$(arg lidar_candidate_max_age)" />
+    <param name="target_class_id" value="$(arg target_class_id)" />
+    <param name="lidar_visual_max_center_distance" value="$(arg lidar_visual_max_center_distance)" />
+    <param name="lidar_visual_min_rank_separation" value="$(arg lidar_visual_min_rank_separation)" />
+    <param name="lidar_require_single_detection_on_acquire" value="$(arg lidar_require_single_detection_on_acquire)" />
+    <param name="lidar_frustum_cluster_radius" value="$(arg lidar_frustum_cluster_radius)" />
+    <param name="lidar_frustum_min_points" value="$(arg lidar_frustum_min_points)" />
+    <param name="lidar_frustum_max_points" value="$(arg lidar_frustum_max_points)" />
+    <param name="lidar_frustum_max_extent" value="$(arg lidar_frustum_max_extent)" />
+    <param name="lidar_frustum_max_diagonal" value="$(arg lidar_frustum_max_diagonal)" />
+    <param name="lidar_frustum_max_center_distance" value="$(arg lidar_frustum_max_center_distance)" />
+    <param name="lidar_frustum_min_rank_separation" value="$(arg lidar_frustum_min_rank_separation)" />
+    <param name="lidar_visual_filter_max_age" value="$(arg lidar_visual_filter_max_age)" />
+    <param name="lidar_visual_filter_margin" value="$(arg lidar_visual_filter_margin)" />
   </node>
 
   <node if="$(arg rviz)" pkg="rviz" type="rviz" name="yolo_trt_rviz"

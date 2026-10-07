@@ -28,6 +28,7 @@ libcustom_layernorm.so
 
 # Ignore TensorRT engine files.
 /src/realflight_modules/VINS-Fusion-gpu/superpoint/model/*.engine
+/src/perception/yolo_trt_detector/models/best_floatdepth.engine
 
 # Ignore TensorRT buffer library files.
 /src/realflight_modules/VINS-Fusion-gpu/superpoint/3rdparty/tensorrtbuffer/lib/*

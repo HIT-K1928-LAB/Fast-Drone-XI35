@@ -111,3 +111,48 @@ the drone's ROS master and view `/yolo_trt/annotated_image` in an Image panel.
 
 Compare a few synchronized RGB/depth pairs against the PyTorch or ONNX result
 from the original training repo before using detections for any flight task.
+
+## LiDAR-primary target tracking
+
+The `orin-lidar-01` flight profile enables a LiDAR-primary tracking path. Its
+data flow is:
+
+1. FAST-LIVO publishes one complete motion-compensated scan on
+   `/cloud_undistorted_body_world`. The points use the same FCU-aligned local
+   world convention as the flight odometry.
+2. The detector builds a persistent voxel background, removes static cells,
+   and groups the remaining points with 26-connected voxel clustering.
+3. A YOLO box is projected through the calibrated camera transform and only
+   selects/confirms a LiDAR cluster. D455 depth is not used as a target-position
+   measurement in this mode.
+4. A two-model IMM estimates position, velocity and covariance from later
+   LiDAR clusters. Therefore `/yolo_trt/tracked_target` continues while YOLO
+   is temporarily absent. If LiDAR itself is lost or covariance grows past its
+   limit, identity is cleared and YOLO must confirm a cluster again.
+
+FAST-LIVO controls the dense stream independently of its normal RViz/map
+publication:
+
+```yaml
+publish:
+  dense_undistorted_body_world_en: true
+```
+
+When this option is false—or when the topic has no subscriber—FAST-LIVO skips
+the additional cloud transformation and copy. The existing
+`/cloud_registered`, `/cloud_registered_body_world`, mapping, odometry and PCD
+saving paths are unchanged.
+
+Before a propeller-on test, verify the chain on the ground:
+
+```bash
+rostopic hz /cloud_undistorted_body_world
+rostopic echo -n 1 /cloud_undistorted_body_world/header
+rostopic echo /yolo_trt/target_status
+rostopic echo /yolo_trt/tracked_target
+```
+
+Expected behavior is `LOST` before YOLO identifies a cluster, then
+`CONFIRMED`. Covering the camera should not stop `tracked_target` while the
+Mid-360 still observes the same object. Moving the object outside the LiDAR
+gate for longer than `lidar_lost_time` should return the status to `LOST`.

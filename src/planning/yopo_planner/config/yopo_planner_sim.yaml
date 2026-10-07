@@ -4,7 +4,7 @@ engine_file: "$(find yopo_planner)/model/yopo.engine"
 odom_topic: "$(arg odom_topic)"
 depth_topic: "$(arg depth_topic)"
 ctrl_topic: "$(arg ctrl_topic)"
-goal_topic: "/move_base_simple/goal"
+goal_topic: "/planning/goal"
 traj_start_topic: "/traj_start_trigger"
 wait_for_traj_start_trigger: false
 use_config_camera_extrinsic: true
@@ -15,13 +15,15 @@ visualize: false
 verbose: false
 fp16: true
 depth_replan_rate: 0.0
+rotate_depth_180: false
 
 velocity: 1
 radio_range: 5.0
 ctrl_dt: 0.02
 arrive_distance: 1
-min_depth: 0.04
-max_depth: 20.0
+sensor_min_depth: 0.04
+sensor_reliable_max_depth: 20.0
+model_depth_max: 20.0
 pitch_angle_deg: 0.0
 plan_from_reference: false
 

@@ -45,6 +45,14 @@ link_directories(
   /usr/lib/aarch64-linux-gnu
 )
 
+add_library(yolo_lidar_target_tracker
+  src/lidar_target_tracker.cpp
+)
+
+target_link_libraries(yolo_lidar_target_tracker
+  ${OpenCV_LIBRARIES}
+)
+
 add_executable(yolo_trt_node
   src/yolo_trt_node.cpp
 )
@@ -54,6 +62,7 @@ target_link_libraries(yolo_trt_node
   ${OpenCV_LIBRARIES}
   ${CUDA_LIBRARIES}
   nvinfer
+  yolo_lidar_target_tracker
 )
 
 if(CATKIN_ENABLE_TESTING)
@@ -62,6 +71,46 @@ if(CATKIN_ENABLE_TESTING)
   )
   if(TARGET yolo_image_orientation_test)
     target_link_libraries(yolo_image_orientation_test
+      ${OpenCV_LIBRARIES}
+    )
+  endif()
+
+  catkin_add_gtest(yolo_standoff_goal_test
+    test/test_standoff_goal.cpp
+  )
+  if(TARGET yolo_standoff_goal_test)
+    target_link_libraries(yolo_standoff_goal_test
+      ${catkin_LIBRARIES}
+    )
+  endif()
+
+  catkin_add_gtest(yolo_track_reacquisition_test
+    test/test_track_reacquisition.cpp
+  )
+
+  catkin_add_gtest(yolo_publication_limiter_test
+    test/test_publication_limiter.cpp
+  )
+
+  catkin_add_gtest(yolo_lidar_target_tracker_test
+    test/test_lidar_target_tracker.cpp
+  )
+  if(TARGET yolo_lidar_target_tracker_test)
+    target_link_libraries(yolo_lidar_target_tracker_test
+      yolo_lidar_target_tracker
+      ${OpenCV_LIBRARIES}
+    )
+  endif()
+
+  catkin_add_gtest(yolo_visual_lidar_match_test
+    test/test_visual_lidar_match.cpp
+  )
+
+  catkin_add_gtest(yolo_frustum_lidar_association_test
+    test/test_frustum_lidar_association.cpp
+  )
+  if(TARGET yolo_frustum_lidar_association_test)
+    target_link_libraries(yolo_frustum_lidar_association_test
       ${OpenCV_LIBRARIES}
     )
   endif()

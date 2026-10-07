@@ -11,6 +11,7 @@ which is included as part of this source code package.
 */
 
 #include "LIVMapper.h"
+#include "aligned_point_cloud.h"
 #include "output_path.h"
 #include "pointcloud_publication.h"
 
@@ -118,7 +119,6 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 6);
   nh.param<int>("preprocess/point_filter_num", p_pre->point_filter_num, 3);
   nh.param<bool>("preprocess/feature_extract_enabled", p_pre->feature_enabled, false);
-
   nh.param<int>("pcd_save/interval", pcd_save_interval, -1);
   nh.param<bool>("pcd_save/pcd_save_en", pcd_save_en, false);
   nh.param<int>("pcd_save/type", pcd_save_type, 0);
@@ -234,6 +234,9 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<int>("publish/pub_scan_num", pub_scan_num, 1);
   nh.param<bool>("publish/pub_effect_point_en", pub_effect_point_en, false);
   nh.param<bool>("publish/dense_map_en", dense_map_en, false);
+  nh.param<bool>(
+      "publish/dense_undistorted_body_world_en",
+      publish_dense_undistorted_body_world_en, false);
 
   p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 }
@@ -367,6 +370,10 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   sub_img = nh.subscribe(img_topic, img_subscriber_queue_size, &LIVMapper::img_cbk, this);
   
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
+  pubLaserCloudBodyWorld = nh.advertise<sensor_msgs::PointCloud2>(
+      "/cloud_registered_body_world", 10);
+  pubLaserCloudDenseBodyWorld = nh.advertise<sensor_msgs::PointCloud2>(
+      "/cloud_undistorted_body_world", 2);
   pubNormal = nh.advertise<visualization_msgs::MarkerArray>("visualization_marker", 100);
   pubSubVisualMap = nh.advertise<sensor_msgs::PointCloud2>("/cloud_visual_sub_map_before", 100);
   pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100);
@@ -660,6 +667,7 @@ void LIVMapper::handleLIO()
   *pcl_w_wait_pub = *laserCloudWorld;
 
   publish_frame_world(pubLaserCloudFullRes, vio_manager);
+  publish_dense_undistorted_body_world();
   if (pub_effect_point_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
   if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap();
   publish_path(pubPath);
@@ -1461,6 +1469,29 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
     laserCloudmsg.header.stamp = ros::Time::now(); //.fromSec(last_timestamp_lidar);
     laserCloudmsg.header.frame_id = "camera_init";
     pubLaserCloudFullRes.publish(laserCloudmsg);
+
+    // /LIVO2/imu_propagate is expressed in the FCU-body-aligned world, while
+    // /cloud_registered remains in FAST-LIVO's raw camera_init world. EGO's
+    // cloud callback uses XYZ directly, so publish a separate cloud with the
+    // exact same yaw rotation and initial-position subtraction as the odometry.
+    if (body_pose_output_en && bodyPoseOutputReady() &&
+        pubLaserCloudBodyWorld.getNumSubscribers() > 0)
+    {
+      sensor_msgs::PointCloud2 aligned_cloud = laserCloudmsg;
+      const V3D origin = zero_initial_position
+                             ? initial_body_position
+                             : V3D::Zero();
+      if (fast_livo::alignWorldPointCloudInPlace(
+              aligned_cloud, body_pose_world_alignment, origin))
+      {
+        aligned_cloud.header.frame_id = "world";
+        pubLaserCloudBodyWorld.publish(aligned_cloud);
+      }
+      else
+      {
+        ROS_WARN_THROTTLE(5.0, "FAST-LIVO aligned cloud is missing float32 XYZ fields.");
+      }
+    }
   }
 
   /**************** save map ****************/
@@ -1563,6 +1594,47 @@ void LIVMapper::publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, 
 
   if(laserCloudWorldRGB->size() > 0)  PointCloudXYZI().swap(*pcl_wait_pub); 
   if(LidarMeasures.lio_vio_flg == VIO)  PointCloudXYZI().swap(*pcl_w_wait_pub);
+}
+
+void LIVMapper::publish_dense_undistorted_body_world()
+{
+  // This stream is intentionally independent from dense_map_en.  The normal
+  // mapping/RViz publication keeps its existing density, while perception can
+  // opt into one full motion-compensated scan.  Do no transform/copy work when
+  // disabled or when nobody consumes the topic.
+  if (!publish_dense_undistorted_body_world_en ||
+      pubLaserCloudDenseBodyWorld.getNumSubscribers() == 0 ||
+      !body_pose_output_en || !bodyPoseOutputReady() ||
+      !feats_undistort || feats_undistort->empty())
+  {
+    return;
+  }
+
+  PointCloudXYZI::Ptr dense_world(new PointCloudXYZI(
+      feats_undistort->points.size(), 1));
+  for (size_t i = 0; i < feats_undistort->points.size(); ++i)
+  {
+    RGBpointBodyToWorld(
+        &feats_undistort->points[i], &dense_world->points[i]);
+  }
+
+  sensor_msgs::PointCloud2 message;
+  pcl::toROSMsg(*dense_world, message);
+  message.header.stamp = ros::Time::now();
+  message.header.frame_id = "camera_init";
+  const V3D origin = zero_initial_position
+                         ? initial_body_position
+                         : V3D::Zero();
+  if (!fast_livo::alignWorldPointCloudInPlace(
+          message, body_pose_world_alignment, origin))
+  {
+    ROS_WARN_THROTTLE(
+        5.0,
+        "FAST-LIVO dense undistorted cloud is missing float32 XYZ fields.");
+    return;
+  }
+  message.header.frame_id = "world";
+  pubLaserCloudDenseBodyWorld.publish(message);
 }
 
 void LIVMapper::publish_visual_sub_map(const ros::Publisher &pubSubVisualMap)
