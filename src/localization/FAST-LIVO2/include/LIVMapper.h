@@ -60,7 +60,6 @@ public:
   void img_cbk(const sensor_msgs::ImageConstPtr &msg_in);
   void publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager);
   void publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, VIOManagerPtr vio_manager);
-  void publish_dense_undistorted_body_world();
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
   void publish_effect_world(const ros::Publisher &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list);
   void publish_odometry(const ros::Publisher &pubOdomAftMapped);
@@ -164,7 +163,6 @@ public:
 
   bool lidar_pushed = false, imu_en, gravity_est_en, flg_reset = false, ba_bg_est_en = true;
   bool dense_map_en = false;
-  bool publish_dense_undistorted_body_world_en = false;
   int img_en = 1, imu_int_frame = 3;
   bool normal_en = true;
   bool exposure_estimate_en = false;
@@ -231,8 +229,6 @@ public:
   ros::Subscriber sub_imu;
   ros::Subscriber sub_img;
   ros::Publisher pubLaserCloudFullRes;
-  ros::Publisher pubLaserCloudBodyWorld;
-  ros::Publisher pubLaserCloudDenseBodyWorld;
   ros::Publisher pubNormal;
   ros::Publisher pubSubVisualMap;
   ros::Publisher pubLaserCloudEffect;
