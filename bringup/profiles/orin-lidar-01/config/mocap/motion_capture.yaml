@@ -1,0 +1,5 @@
+# VRPN topics for the orin-lidar-01 rigid body.
+# Change orin_10 to the rigid-body name configured in the mocap server.
+motion_capture_pose_topic: "/vrpn_client_node/orin10/pose"
+motion_capture_twist_topic: "/vrpn_client_node/orin10/twist"
+motion_capture_accel_topic: "/vrpn_client_node/orin10/accel"

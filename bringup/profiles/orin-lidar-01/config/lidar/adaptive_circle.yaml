@@ -1,0 +1,51 @@
+# Adaptive circle trajectory test for orin-lidar-01.
+# Start only after the OFFBOARD FSM has completed takeoff and entered HOVER.
+
+topics:
+  planner_command: "/position_cmd"
+  livo_odometry: "/LIVO2/imu_propagate"
+  px4_odometry: "/mavros/local_position/odom"
+  reference: "/offboard_fsm/reference"
+  fsm_status: "/offboard_fsm/status"
+  emergency_hover: "/planning/Emergency_hover"
+  current_speed: "/adaptive_circle/current_speed"
+  tracking_error: "/adaptive_circle/tracking_error"
+  search_status: "/adaptive_circle/search_status"
+
+frames:
+  planner: "camera_init"
+
+circle:
+  radius: 2.0
+  clockwise: false
+  initial_speed: 4.0
+  speed_step: 0.5
+  speed_ramp_acceleration: 0.5
+  command_rate: 50.0
+
+evaluation:
+  # Each candidate speed must settle before its tracking-error window starts.
+  settle_time: 3.0
+  window_time: 5.0
+  pass_rms_error: 1.5
+  pass_p95_error: 1.5
+  fail_rms_error: 1.6
+  fail_peak_error: 1.70
+  emergency_error: 1.70
+  emergency_hold_time: 0.80
+
+safety:
+  # false requires an explicit call to /adaptive_circle/start.
+  auto_start: false
+  feedback_timeout: 0.90
+  fsm_status_timeout: 0.90
+  speed_target_tolerance: 0.02
+
+limits:
+  # 0 disables an additional test-specific velocity cap. The node still reads
+  # the OFFBOARD FSM limits and enforces v <= max_velocity and v^2/r <= max_acceleration.
+  hard_max_speed: 0.0
+  fsm_max_velocity_param: "/px4_offboard_fsm/planner/max_velocity"
+  fsm_max_acceleration_param: "/px4_offboard_fsm/planner/max_acceleration"
+  fsm_max_velocity_fallback: 20.0
+  fsm_max_acceleration_fallback: 10.0

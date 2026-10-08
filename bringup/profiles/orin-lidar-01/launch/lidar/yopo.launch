@@ -1,0 +1,17 @@
+<launch>
+  <arg name="config_file"
+       default="$(dirname)/../../config/lidar/yopo.yaml"/>
+
+  <!-- FAST-LIVO2 uses the same initialized world coordinates for
+       /LIVO2/imu_propagate (frame_id=world) and its map
+       (frame_id=camera_init). Publish the identity frame alias so RViz can
+       overlay YOPO trajectories on the FAST-LIVO2 map. -->
+  <node pkg="tf2_ros"
+        type="static_transform_publisher"
+        name="fast_livo_world_frame_alias"
+        args="0 0 0 0 0 0 1 camera_init world"/>
+
+  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
+    <arg name="config_file" value="$(arg config_file)"/>
+  </include>
+</launch>

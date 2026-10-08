@@ -1,0 +1,84 @@
+<launch>
+  <!-- FAST-LIVO world-frame point cloud + odometry EGO-Planner profile. -->
+  <arg name="drone_id" default="0"/>
+  <arg name="start_fsm" default="true"/>
+
+  <arg name="odom_topic" default="/LIVO2/imu_propagate"/>
+  <arg name="cloud_topic" default="/cloud_registered"/>
+
+  <!-- Local test volume around the FAST-LIVO initialization origin. -->
+  <arg name="map_size_x" default="20.0"/>
+  <arg name="map_size_y" default="20.0"/>
+  <arg name="map_size_z" default="3.0"/>
+  <arg name="map_origin_x" default="-10.0"/>
+  <arg name="map_origin_y" default="-10.0"/>
+
+  <!--
+    The common EGO-Planner node supports either synchronized depth+pose or an
+    already world-registered PointCloud2. Dummy depth topics make this launch
+    use only the MID360 cloud path.
+  -->
+  <include file="$(find ego_planner)/launch/advanced_param_exp.xml">
+    <arg name="drone_id" value="$(arg drone_id)"/>
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+    <arg name="map_origin_x_" value="$(arg map_origin_x)"/>
+    <arg name="map_origin_y_" value="$(arg map_origin_y)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num_set" value="0"/>
+
+    <arg name="camera_pose_topic" value="/unused_ego_camera_pose"/>
+    <arg name="depth_topic" value="/unused_ego_depth"/>
+    <arg name="cloud_topic" value="$(arg cloud_topic)"/>
+
+    <!-- Required include arguments; unused by the point-cloud callback. -->
+    <arg name="cx" value="0.0"/>
+    <arg name="cy" value="0.0"/>
+    <arg name="fx" value="1.0"/>
+    <arg name="fy" value="1.0"/>
+
+    <arg name="max_vel" value="0.30"/>
+    <arg name="max_acc" value="0.80"/>
+    <arg name="planning_horizon" value="3.5"/>
+    <arg name="use_distinctive_trajs" value="false"/>
+
+    <!-- 1: accept an RViz 2D Nav Goal; no trajectory starts at launch. -->
+    <arg name="flight_type" value="1"/>
+    <arg name="point_num" value="1"/>
+    <arg name="point0_x" value="0.0"/>
+    <arg name="point0_y" value="0.0"/>
+    <arg name="point0_z" value="0.7"/>
+    <arg name="point1_x" value="0.0"/>
+    <arg name="point1_y" value="0.0"/>
+    <arg name="point1_z" value="0.7"/>
+    <arg name="point2_x" value="0.0"/>
+    <arg name="point2_y" value="0.0"/>
+    <arg name="point2_z" value="0.7"/>
+    <arg name="point3_x" value="0.0"/>
+    <arg name="point3_y" value="0.0"/>
+    <arg name="point3_z" value="0.7"/>
+    <arg name="point4_x" value="0.0"/>
+    <arg name="point4_y" value="0.0"/>
+    <arg name="point4_z" value="0.7"/>
+  </include>
+
+  <!-- Override experimental defaults with this aircraft's safe first-flight profile. -->
+  <rosparam command="load"
+            file="$(dirname)/../../config/lidar/ego_planner_lidar.yaml"
+            ns="/drone_$(arg drone_id)_ego_planner_node"/>
+
+  <node pkg="ego_planner"
+        name="drone_$(arg drone_id)_traj_server"
+        type="traj_server"
+        output="screen"
+        required="true">
+    <remap from="~planning/bspline"
+           to="/drone_$(arg drone_id)_planning/bspline"/>
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+  </node>
+
+  <!-- Start the PX4-native OFFBOARD lifecycle state machine when requested. -->
+  <include if="$(arg start_fsm)"
+           file="$(dirname)/offboard_fsm.launch"/>
+</launch>

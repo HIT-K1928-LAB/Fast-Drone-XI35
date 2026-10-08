@@ -1,0 +1,114 @@
+# orin-lidar-01：Gazebo 真值定位 + PX4 SITL 的 OFFBOARD 状态机配置。
+# 控制参数与实机保持一致，仅替换仿真接口并关闭遥控器触发。
+schema_version: 1
+
+node:
+  control_rate: 50.0
+  status_rate: 10.0
+  start_enabled: true
+  prestream_when_ready: true
+  prestream_min_time: 1.2
+  request_offboard_automatically: true
+
+topics:
+  mavros_state: "/iris_0/mavros/state"
+  extended_state: "/iris_0/mavros/extended_state"
+  px4_odometry: "/iris_0/mavros/local_position/odom"
+  livo_odometry: "/gazebo/iris_0/odometry"
+  rc_input: "/iris_0/mavros/rc/in"
+  planner_command: "/position_cmd"
+  planner_emergency_hover: "/planning/Emergency_hover"
+  fsm_command: "/offboard_fsm/command"
+  planner_lifecycle: "/px4ctrl/takeoff_land"
+  traj_start_trigger: "/traj_start_trigger"
+  setpoint: "/iris_0/mavros/setpoint_raw/local"
+  status: "/offboard_fsm/status"
+  reference: "/offboard_fsm/reference"
+  diagnostics: "/diagnostics"
+
+services:
+  arming: "/iris_0/mavros/cmd/arming"
+  set_mode: "/iris_0/mavros/set_mode"
+  message_interval: "/iris_0/mavros/set_message_interval"
+
+timeouts:
+  mavros_state: 2.5
+  extended_state: 2.0
+  px4_odometry: 0.80
+  livo_odometry: 0.80
+  planner_command: 0.80
+  rc_input: 0.5
+  arm_request: 5.0
+  disarm_request: 5.0
+  takeoff: 20.0
+  landing: 30.0
+
+# SITL 通过 /offboard_fsm/command 驱动流程，不依赖实体遥控器。
+rc:
+  enabled: false
+  index_base: 1
+  debounce_time: 0.15
+  require_release_before_trigger: true
+  takeoff_land:
+    channel: 9
+    reversed: false
+    trigger_pwm: 1700
+    release_pwm: 1300
+
+takeoff:
+  relative_height: 2.0
+  max_velocity: 1.0
+  max_acceleration: 0.5
+  max_jerk: 1.0
+  position_tolerance: 0.08
+  velocity_tolerance: 0.12
+  stable_time: 1.0
+
+planner:
+  activation_messages: 3
+  max_position_jump: 0.5
+  max_yaw_jump_deg: 30.0
+  max_velocity: 20.0
+  max_acceleration: 40.0
+  brake_acceleration: 10.0
+  brake_velocity_tolerance: 0.15
+  brake_stable_time: 0.5
+
+landing:
+  strategy: "offboard_descent"
+  max_velocity: 0.30
+  max_acceleration: 0.40
+  flare_height: 0.30
+  flare_velocity: 0.15
+  touchdown_confirm_time: 1.0
+  auto_disarm: true
+  disarm_delay: 1.0
+  max_descent_distance: 10.0
+
+frames:
+  align_planner_on_offboard_entry: false
+
+limits:
+  max_horizontal_distance: 100.0
+  max_height_above_origin: 10.0
+  min_height_below_origin: -0.50
+
+failsafe:
+  stop_setpoints_on_critical_failure: true
+
+requests:
+  retry_interval: 1.0
+
+message_intervals:
+  enabled: true
+  reapply_on_reconnect: true
+  retry_count: 3
+  retry_delay: 0.5
+  messages:
+    - {name: "ATTITUDE_QUATERNION", id: 31, rate: 100.0, enabled: false, required: false}
+    - {name: "LOCAL_POSITION_NED", id: 32, rate: 50.0, enabled: true, required: true}
+    - {name: "RC_CHANNELS", id: 65, rate: 20.0, enabled: true, required: false}
+    - {name: "HIGHRES_IMU", id: 105, rate: 50.0, enabled: false, required: false}
+    - {name: "BATTERY_STATUS", id: 147, rate: 10.0, enabled: true, required: false}
+    - {name: "EXTENDED_SYS_STATE", id: 245, rate: 5.0, enabled: true, required: true}
+    - {name: "SYS_STATUS", id: 1, rate: 2.0, enabled: true, required: false}

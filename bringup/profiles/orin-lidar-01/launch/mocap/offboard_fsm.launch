@@ -1,0 +1,10 @@
+<launch>
+  <node pkg="px4ctrl"
+        type="offboard_fsm_node"
+        name="px4_offboard_fsm"
+        output="screen"
+        required="true">
+    <rosparam command="load"
+              file="$(dirname)/../../config/mocap/offboard_fsm.yaml"/>
+  </node>
+</launch>

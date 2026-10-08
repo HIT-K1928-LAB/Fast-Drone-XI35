@@ -1,0 +1,5 @@
+<launch>
+  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
+    <arg name="odom_topic" value="/motion_capture/motion_capture_odom"/>
+  </include>
+</launch>

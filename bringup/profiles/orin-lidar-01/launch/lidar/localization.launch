@@ -1,0 +1,20 @@
+<launch>
+  <arg name="rviz" default="false"/>
+  <arg name="d455_serial_no" default=""/>
+  <arg name="d455_usb_port_id" default=""/>
+
+  <!-- The profile owns all machine-specific D455, FAST-LIVO2, and MAVROS
+       connection config. The two JSON files are native device-driver formats;
+       all ROS parameters are consolidated in mid360_d455.yaml. -->
+  <include file="$(find fast_livo)/launch/mid360_orin.launch">
+    <arg name="rviz" value="$(arg rviz)"/>
+    <arg name="d455_serial_no" value="$(arg d455_serial_no)"/>
+    <arg name="d455_usb_port_id" value="$(arg d455_usb_port_id)"/>
+    <arg name="mid360_config"
+         value="$(dirname)/../../config/lidar/fastlivo2/mid360_driver.json"/>
+    <arg name="realsense_json_file"
+         value="$(dirname)/../../config/lidar/fastlivo2/realsense_d455_advanced.json"/>
+    <arg name="fastlivo_config_file"
+         value="$(dirname)/../../config/lidar/fastlivo2/mid360_d455.yaml"/>
+  </include>
+</launch>

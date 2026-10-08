@@ -1,0 +1,175 @@
+<launch>
+  <arg name="publish_planner_goal" default="false"/>
+  <arg name="planner_goal_publish_rate" default="10.0"/>
+  <arg name="planner_goal_standoff_distance" default="0.0"/>
+  <arg name="odom_topic" default="/mavros/local_position/odom"/>
+
+  <!--
+    orin-lidar-01 的 RGB-D YOLO 正式启动入口。
+    FAST-LIVO2/RealSense 已负责启动 D455，本文件只启动检测节点，不能再启动相机驱动。
+  -->
+  <include file="$(find yolo_trt_detector)/launch/yolo_trt_detector.launch">
+    <arg name="engine_file" value="$(find yolo_trt_detector)/models/best_floatdepth.engine"/>
+    <arg name="image_topic" value="/camera/color/image_raw"/>
+    <arg name="depth_topic" value="/camera/aligned_depth_to_color/image_raw"/>
+    <arg name="camera_info_topic" value="/camera/color/camera_info"/>
+    <!-- D455 倒置安装：RGB 与对齐深度同步旋转后再送入 TensorRT。 -->
+    <arg name="rotate_input_180" value="true"/>
+
+    <!-- 目标世界坐标与实际控制反馈统一使用 PX4 EKF 本地里程计。 -->
+    <arg name="odom_topic" value="$(arg odom_topic)"/>
+    <arg name="publish_target_point" value="true"/>
+    <!--
+      /target_point 是确认后的兼容输出；raw 用于调试；tracked_target 同时包含
+      速度和协方差；target_status 为 LOST/TENTATIVE/CONFIRMED/COASTING。
+    -->
+    <arg name="target_topic" value="/yolo_trt/target_point"/>
+    <arg name="raw_target_topic" value="/yolo_trt/target_point_raw"/>
+    <arg name="tracked_odom_topic" value="/yolo_trt/tracked_target"/>
+    <arg name="tracker_status_topic" value="/yolo_trt/target_status"/>
+    <arg name="target_mask_topic" value="/yolo_trt/tracked_target_mask"/>
+    <arg name="tracked_target_publish_rate" value="10.0"/>
+    <!--
+      动态目标只通过 tracked_target/status 交给规划器；/planning/goal 保留给脚本
+      和手动三维目标，避免动态目标被重复做停靠距离转换。
+    -->
+    <arg name="publish_planner_goal" value="$(arg publish_planner_goal)"/>
+    <!-- Shared 3D goal input: start either YOPO or EGO as the active planner. -->
+    <arg name="planner_goal_topic" value="/planning/goal"/>
+    <arg name="planner_goal_publish_rate" value="$(arg planner_goal_publish_rate)"/>
+    <arg name="planner_goal_standoff_distance" value="$(arg planner_goal_standoff_distance)"/>
+    <arg name="frame_id" value="map"/>
+    <arg name="global_frame_id" value="map"/>
+    <arg name="output_world_frame" value="true"/>
+
+    <!-- 与 YOPO 共用同一套 D455 深度光学坐标系到机体坐标系的完整外参。 -->
+    <arg name="use_vins_extrinsic" value="false"/>
+    <arg name="use_camera_rotation_matrix" value="true"/>
+    <arg name="camera_r00" value="0.036261566"/>
+    <arg name="camera_r01" value="0.011340975"/>
+    <arg name="camera_r02" value="0.999278791"/>
+    <arg name="camera_r10" value="0.999341516"/>
+    <arg name="camera_r11" value="-0.001017994"/>
+    <arg name="camera_r12" value="-0.036252375"/>
+    <arg name="camera_r20" value="0.000605743"/>
+    <arg name="camera_r21" value="0.999934636"/>
+    <arg name="camera_r22" value="-0.011370309"/>
+    <arg name="camera_tx" value="0.044099153"/>
+    <arg name="camera_ty" value="-0.048871726"/>
+    <arg name="camera_tz" value="-0.089902311"/>
+
+    <!--
+      只保留置信度 >= 0.60 的无人机候选。单帧候选不会立即建立身份，
+      还需要通过下方 LiDAR/YOLO 最近 7 帧至少 5 帧的时序投票。
+    -->
+    <arg name="conf_threshold" value="0.60"/>
+    <arg name="nms_threshold" value="0.70"/>
+    <arg name="depth_scale" value="0.001"/>
+    <arg name="max_pair_dt" value="0.05"/>
+    <arg name="depth_roi_radius" value="3"/>
+    <!-- 中央 35% 框内深度做聚类中值与 MAD 检查，降低背景/空洞干扰。 -->
+    <arg name="depth_roi_scale" value="0.35"/>
+    <arg name="depth_min_samples" value="12"/>
+    <arg name="depth_cluster_abs" value="0.25"/>
+    <arg name="depth_cluster_rel" value="0.08"/>
+    <arg name="depth_mad_max" value="0.25"/>
+    <arg name="target_min_depth" value="0.25"/>
+    <arg name="target_max_depth" value="15.0"/>
+    <!-- 仅在较远距离移除目标本体，近距离仍保留为深度障碍物。 -->
+    <arg name="target_mask_expand_scale" value="1.20"/>
+
+    <!-- 使用图像时刻的 FAST-LIVO 位姿插值，避免用“最新位姿”造成动态偏差。 -->
+    <arg name="odom_buffer_duration" value="2.0"/>
+    <arg name="odom_max_time_offset" value="0.10"/>
+
+    <!-- 单目标三维匀速 Kalman 跟踪与生命周期。 -->
+    <arg name="enable_target_tracking" value="true"/>
+    <!-- 初始化和后续YOLO身份更新均不接受低于0.60的检测。 -->
+    <arg name="track_init_confidence" value="0.60"/>
+    <arg name="track_update_confidence" value="0.60"/>
+    <arg name="track_confirm_hits" value="3"/>
+    <arg name="track_confirm_window" value="5"/>
+    <arg name="track_gate_mahalanobis" value="11.34"/>
+    <arg name="track_init_gate_distance" value="1.2"/>
+    <arg name="track_coast_publish_time" value="1.00"/>
+    <arg name="track_lost_time" value="1.50"/>
+    <arg name="track_identity_memory_time" value="3.0"/>
+    <arg name="track_reacquire_distance" value="1.5"/>
+    <arg name="track_max_measurement_jump" value="1.0"/>
+    <arg name="track_process_accel_std" value="1.5"/>
+    <arg name="track_measurement_std" value="0.08"/>
+    <arg name="track_initial_position_std" value="0.15"/>
+    <arg name="track_initial_velocity_std" value="1.0"/>
+
+    <!--
+      LiDAR supplies range, motion and covariance. YOLO only confirms which
+      projected cluster is the target; image loss therefore does not stop the
+      3D track. The 0.65 m self mask is larger than the 0.5 m propeller span.
+    -->
+    <arg name="enable_lidar_target_tracking" value="true"/>
+    <arg name="lidar_cloud_topic" value="/cloud_registered"/>
+    <arg name="lidar_min_range" value="0.45"/>
+    <arg name="lidar_max_range" value="18.0"/>
+    <arg name="lidar_self_exclusion_radius" value="0.65"/>
+    <arg name="lidar_background_voxel_size" value="0.18"/>
+    <arg name="lidar_background_confirm_frames" value="8"/>
+    <arg name="lidar_background_forget_seconds" value="3.0"/>
+    <arg name="lidar_cluster_voxel_size" value="0.12"/>
+    <arg name="lidar_cluster_min_points" value="3"/>
+    <arg name="lidar_cluster_max_points" value="1200"/>
+    <arg name="lidar_cluster_max_extent" value="0.80"/>
+    <arg name="lidar_cluster_max_diagonal" value="1.00"/>
+    <arg name="lidar_track_gate_distance" value="0.35"/>
+    <arg name="lidar_track_gate_max_distance" value="0.45"/>
+    <arg name="lidar_association_min_score_separation" value="0.12"/>
+    <arg name="lidar_track_protection_radius" value="0.75"/>
+    <arg name="lidar_lost_time" value="0.60"/>
+    <arg name="lidar_covariance_lost_threshold" value="0.50"/>
+    <arg name="lidar_visual_confirmation_gate" value="0.30"/>
+    <!-- 滑动窗口投票：最近7帧中至少5帧(71.4%)同时通过YOLO和LiDAR关联才确认目标。 -->
+    <arg name="lidar_visual_confirm_hits" value="5"/>
+    <arg name="lidar_visual_confirm_window" value="7"/>
+    <arg name="lidar_visual_confirm_max_gap" value="0.25"/>
+    <arg name="lidar_visual_tentative_gate" value="0.15"/>
+    <arg name="lidar_visual_tentative_max_speed" value="2.0"/>
+    <arg name="lidar_visual_acquire_max_range" value="8.0"/>
+    <arg name="lidar_visual_max_age" value="1.0"/>
+    <!-- YOLO只负责身份初始化；身份建立后由连续LiDAR运动约束决定是否丢失。 -->
+    <arg name="lidar_require_recent_visual_confirmation" value="false"/>
+    <arg name="lidar_max_target_speed" value="4.0"/>
+    <arg name="lidar_max_target_acceleration" value="8.0"/>
+    <arg name="lidar_measurement_position_slack" value="0.08"/>
+    <arg name="lidar_measurement_max_update_distance" value="0.45"/>
+    <arg name="lidar_measurement_velocity_slack" value="0.5"/>
+    <arg name="lidar_measurement_std" value="0.10"/>
+    <arg name="lidar_smooth_model_accel_std" value="0.7"/>
+    <arg name="lidar_maneuver_model_accel_std" value="3.0"/>
+    <arg name="lidar_target_physical_size" value="0.55"/>
+    <!-- 0.55 m无人机在3 m处实测约7~15点，按投影面积/range^2建立宽松点数包络。 -->
+    <arg name="lidar_enforce_range_point_count" value="true"/>
+    <arg name="lidar_point_density_at_1m" value="300.0"/>
+    <arg name="lidar_point_count_min_ratio" value="0.15"/>
+    <arg name="lidar_point_count_max_ratio" value="5.0"/>
+    <arg name="lidar_visual_match_margin" value="0.05"/>
+    <arg name="lidar_candidate_max_age" value="0.15"/>
+    <arg name="target_class_id" value="0"/>
+    <arg name="lidar_visual_max_center_distance" value="0.35"/>
+    <arg name="lidar_visual_min_rank_separation" value="0.12"/>
+    <arg name="lidar_require_single_detection_on_acquire" value="true"/>
+    <!-- 将降采样世界点云投影进YOLO框，再在视锥内分层聚类。 -->
+    <arg name="lidar_frustum_cluster_radius" value="0.12"/>
+    <arg name="lidar_frustum_min_points" value="3"/>
+    <arg name="lidar_frustum_max_points" value="800"/>
+    <arg name="lidar_frustum_max_extent" value="0.80"/>
+    <arg name="lidar_frustum_max_diagonal" value="1.00"/>
+    <arg name="lidar_frustum_max_center_distance" value="0.55"/>
+    <arg name="lidar_frustum_min_rank_separation" value="0.15"/>
+    <!-- 图像刚确认过目标时，LiDAR更新必须仍投影在该目标框内。 -->
+    <arg name="lidar_visual_filter_max_age" value="0.25"/>
+    <arg name="lidar_visual_filter_margin" value="0.20"/>
+
+    <!-- 首次联调使用 10 Hz，足够匹配 YOPO 10 Hz 重规划并降低 Orin 负载。 -->
+    <arg name="detect_hz" value="10"/>
+    <arg name="rviz" value="false"/>
+  </include>
+</launch>

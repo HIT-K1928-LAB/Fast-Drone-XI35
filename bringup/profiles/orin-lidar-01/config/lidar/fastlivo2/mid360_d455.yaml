@@ -1,0 +1,203 @@
+mavros:
+  # MAVROS is started by mid360_orin.launch before FAST-LIVO2. Change only
+  # this value when switching between USB and a Jetson UART.
+  fcu_url: "/dev/ttyACM0:921600"
+  gcs_url: ""
+  target_system_id: 1
+  target_component_id: 1
+  fcu_protocol: "v2.0"
+
+# Intel RealSense D455 ROS驱动基础参数。
+# 设备高级模式参数仍由 realsense_d455_advanced.json 独立加载。
+camera:
+  realsense2_camera:
+    device_type: "d455"
+
+    color_width: 640
+    color_height: 480
+    color_fps: 30
+    enable_color: true
+
+    # YOPO使用480x270原始深度；RealSense会另外生成与640x480彩色图
+    # 像素对齐的深度图，供RGB-D YOLO使用。
+    depth_width: 480
+    depth_height: 270
+    depth_fps: 30
+    enable_depth: true
+    # 深度激光发射器由realsense_d455_advanced.json保持开启。
+    # FAST-LIVO2使用彩色图像，IMU使用Mid-360内置IMU。
+    enable_infra: false
+    enable_infra1: false
+    enable_infra2: false
+    enable_gyro: false
+    enable_accel: false
+    enable_pointcloud: false
+
+    # 为RGB-D YOLO发布与彩色图同步、对齐后的深度图。
+    enable_sync: true
+    align_depth: true
+    publish_tf: false
+    initial_reset: false
+    reconnect_timeout: 6.0
+    wait_for_device_timeout: -1.0
+
+common:
+  img_topic: "/camera/color/image_raw"
+  lid_topic: "/livox/lidar"
+  imu_topic: "/livox/imu"
+  img_en: true
+  lidar_en: true
+  ros_driver_bug_fix: false
+
+# Protect the 16 GB Orin from a D455 reconnect that publishes faster
+# than the estimator can consume. The phase-based limiter tolerates normal
+# 10 Hz timestamp jitter, and both ROS and decoded-image queues stay bounded.
+image_input:
+  max_rate_hz: 10.0
+  rate_tolerance_ratio: 0.20
+  subscriber_queue_size: 3
+  buffer_max_frames: 3
+
+extrin_calib:
+  # MID360 built-in IMU to LiDAR; use the device-aligned frame convention.
+  extrinsic_T: [0.0, 0.0, 0.0]
+  extrinsic_R: [1, 0, 0,
+                0, 1, 0,
+                0, 0, 1]
+  # FAST-Calib center-scene result, 2026-09-12.
+  # T_cam_lidar: p_camera = Rcl * p_lidar + Pcl.
+  # Saved control-point RMSE: 0.003 m; maximum residual: 0.004 m.
+  Rcl: [ 0.009786,  0.999948,  0.002761,
+        -0.357811,  0.000923,  0.933793,
+         0.933743, -0.010126,  0.357802]
+  Pcl: [-0.049881, 0.053680, -0.075374]
+
+# Transform FAST-LIVO2's Mid-360 IMU state to the flight-controller IMU.
+# FAST-LIVO2 defines the local world: the initial FCU body yaw and
+# position are both zero. PX4 then fuses this pose as external vision, avoiding
+# any dependency on the PX4 attitude estimate.
+# Kalibr multi-IMU convention (imu0=Livox, imu1=FCU):
+#   p_fcu = R_fcu_livox * p_livox + t_fcu_livox
+# FAST-LIVO2 inverts this once and publishes T_px4_world_fcu.
+body_pose:
+  enabled: true
+  zero_initial_position: true
+  # Do not feed both pose-only and ODOMETRY messages from the same estimator
+  # into EKF2. The ODOMETRY path below includes velocity and covariance.
+  legacy_mavros_pose_enabled: false
+  mavros_pose_rate_hz: 50.0
+  px4_external_odometry:
+    enabled: true
+    topic: "/mavros/odometry/out"
+    # MAVROS converts standard ROS ENU/FLU frames to PX4 NED/FRD.
+    frame_id: "odom"
+    child_frame_id: "base_link"
+    # 0 publishes every fresh IMU-propagated state (normally about 80--100 Hz).
+    rate_hz: 0.0
+    position_stddev: 0.05
+    orientation_stddev: 0.05
+    linear_velocity_stddev: 0.10
+    angular_velocity_stddev: 0.05
+  R_fcu_livox: [ 0.928719158327664,     0.028186162369961323,  0.3697110563751235,
+                 -0.025166576674429137, 0.9995988842847866,   -0.012988993613829738,
+                 -0.36992886934334507,  0.0027587655689106172, 0.9290559836946805]
+  t_fcu_livox: [-0.030591146664829438,
+                -0.036910287242114814,
+                -0.03524249759870778]
+
+# FAST-LIVO2 camera model. LIVMapper loads this namespace directly.
+laserMapping:
+  cam_model: Pinhole
+  cam_width: 640
+  cam_height: 480
+  scale: 1.0
+  cam_fx: 380.1274108886719
+  cam_fy: 379.85546875
+  cam_cx: 317.4156494140625
+  cam_cy: 243.4210968017578
+  # plumb_bob order: k1, k2, p1, p2.
+  cam_d0: -0.05591379106044769
+  cam_d1: 0.0698130801320076
+  cam_d2: -0.0007456860621459782
+  cam_d3: -0.0005889537278562784
+
+time_offset:
+  imu_time_offset: 0.0
+  img_time_offset: 0.0
+  exposure_time_init: 0.0
+
+preprocess:
+  point_filter_num: 1
+  filter_size_surf: 0.1
+  lidar_type: 1
+  scan_line: 4
+  blind: 0.3
+
+vio:
+  max_iterations: 5
+  outlier_threshold: 1000
+  img_point_cov: 200
+  patch_size: 8
+  patch_pyrimid_level: 4
+  normal_en: true
+  raycast_en: false
+  inverse_composition_en: false
+  exposure_estimate_en: true
+  inv_expo_cov: 0.1
+  # Keep the online visual estimator bounded on the 16 GB Orin. A Feature
+  # retains its complete reference image, so limiting only observations per
+  # point is not sufficient to bound memory.
+  visual_map_max_frame_age: 200
+  visual_map_max_points: 20000
+  visual_map_max_distance: 30.0
+  visual_map_prune_interval: 10
+  visual_point_max_observations: 15
+
+imu:
+  imu_en: true
+  imu_int_frame: 50
+  acc_cov: 0.1
+  gyr_cov: 0.1
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+
+lio:
+  max_iterations: 5
+  dept_err: 0.02
+  beam_err: 0.05
+  min_eigen_value: 0.0025
+  voxel_size: 0.5
+  max_layer: 2
+  max_points_num: 50
+  layer_init_num: [5, 5, 5, 5, 5]
+
+local_map:
+  map_sliding_en: false
+  half_map_size: 100
+  sliding_thresh: 8
+
+uav:
+  imu_rate_odom: true
+  gravity_align_en: true
+
+publish:
+  dense_map_en: false
+  pub_effect_point_en: false
+  pub_plane_en: false
+  pub_scan_num: 1
+  blind_rgb_points: 0.0
+
+evo:
+  seq_name: "mid360_d455_orin"
+  pose_output_en: false
+
+pcd_save:
+  pcd_save_en: true
+  type: 0
+  colmap_output_en: false
+  filter_size_pcd: 0.15
+  interval: 100
+
+image_save:
+  img_save_en: false
+  interval: 1

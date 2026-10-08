@@ -1,0 +1,46 @@
+# Conservative MID360/FAST-LIVO settings for the first EGO-Planner flights.
+fsm:
+  thresh_replan_time: 1.0
+  thresh_no_replan_meter: 0.20
+  planning_horizon: 3.5
+  planning_horizen_time: 3.0
+  emergency_time: 1.0
+  realworld_experiment: true
+  fail_safe: true
+
+grid_map:
+  resolution: 0.15
+  local_update_range_x: 4.0
+  local_update_range_y: 4.0
+  local_update_range_z: 2.5
+  obstacles_inflation: 0.25
+  local_map_margin: 20
+  ground_height: -0.10
+  visualization_truncate_height: 2.5
+  frame_id: "world"
+  pose_type: 2
+
+  # These ray/depth values are inactive for the point-cloud input, but are
+  # kept explicit so this profile cannot accidentally inherit camera tuning.
+  use_depth_filter: false
+  min_ray_length: 0.30
+  max_ray_length: 5.0
+
+manager:
+  max_vel: 0.30
+  max_acc: 0.80
+  max_jerk: 1.50
+  control_points_distance: 0.30
+  feasibility_tolerance: 0.05
+  planning_horizon: 3.5
+  use_distinctive_trajs: false
+
+optimization:
+  dist0: 0.50
+  max_vel: 0.30
+  max_acc: 0.80
+
+bspline:
+  limit_vel: 0.30
+  limit_acc: 0.80
+  limit_ratio: 1.10

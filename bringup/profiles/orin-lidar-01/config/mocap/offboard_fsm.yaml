@@ -1,0 +1,131 @@
+# orin-lidar-01：动捕定位模式的 PX4 原生 OFFBOARD 状态机配置。
+# 动捕刚体位姿已标定到飞控机体；位置/速度/姿态闭环仍由 PX4 完成。
+schema_version: 1
+
+# 节点主循环。50 Hz 用于持续满足 PX4 的 OFFBOARD setpoint 要求。
+node:
+  control_rate: 50.0
+  status_rate: 10.0
+  start_enabled: true
+  prestream_when_ready: true
+  prestream_min_time: 1.2
+  # false：由遥控器/地面站切 OFFBOARD；true：起飞命令可自动请求 OFFBOARD。
+  request_offboard_automatically: false
+
+# ROS 接口。px4_odometry 是控制反馈；livo_odometry 是规划坐标系对齐参考。
+topics:
+  mavros_state: "/mavros/state"
+  extended_state: "/mavros/extended_state"
+  # 必须是 PX4 EKF 融合动捕后的本地里程计，不能直接换成原始 VRPN pose。
+  px4_odometry: "/mavros/local_position/odom"
+  # 已标定到飞控机体的动捕里程计，也是本模式规划器使用的世界坐标系。
+  livo_odometry: "/motion_capture/motion_capture_odom"
+  rc_input: "/mavros/rc/in"
+  planner_command: "/position_cmd"
+  planner_emergency_hover: "/planning/Emergency_hover"
+  fsm_command: "/offboard_fsm/command"
+  planner_lifecycle: "/px4ctrl/takeoff_land"
+  setpoint: "/mavros/setpoint_raw/local"
+  status: "/offboard_fsm/status"
+  reference: "/offboard_fsm/reference"
+  diagnostics: "/diagnostics"
+
+services:
+  arming: "/mavros/cmd/arming"
+  set_mode: "/mavros/set_mode"
+  message_interval: "/mavros/set_message_interval"
+
+# 所有超时单位均为秒。PX4 里程计超时属于关键故障，会停止发送 setpoint。
+timeouts:
+  mavros_state: 0.5
+  extended_state: 1.0
+  px4_odometry: 0.30
+  livo_odometry: 0.30
+  planner_command: 0.25
+  rc_input: 0.5
+  arm_request: 5.0
+  disarm_request: 5.0
+  takeoff: 10.0
+  landing: 30.0
+
+# 单一遥控器起降开关：消抖后的激活沿在 GROUND 状态触发起飞，
+# 在 ARMING/TAKEOFF/HOVER/EXTERNAL/BRAKE 状态触发降落。
+# index_base=1 时，channel 7 对应 mavros_msgs/RCIn.channels[6]。
+rc:
+  enabled: true
+  index_base: 1
+  debounce_time: 0.15
+  require_release_before_trigger: true
+  takeoff_land:
+    channel: 7
+    reversed: false
+    trigger_pwm: 1700
+    release_pwm: 1300
+
+# 自动起飞采用限速、限加速度、限 jerk 的平滑垂直轨迹。
+takeoff:
+  relative_height: 0.7
+  max_velocity: 0.4
+  max_acceleration: 0.5
+  max_jerk: 1.0
+  position_tolerance: 0.08
+  velocity_tolerance: 0.12
+  stable_time: 1.0
+
+# 外部规划器接管条件和安全边界。指令超时或非法时进入 BRAKE，再转 HOVER。
+planner:
+  activation_messages: 3
+  max_position_jump: 0.5
+  max_yaw_jump_deg: 30.0
+  max_velocity: 3.0
+  max_acceleration: 4.0
+  brake_acceleration: 1.0
+  brake_velocity_tolerance: 0.15
+  brake_stable_time: 0.5
+
+# OFFBOARD 自动降落参数。确认着陆后可自动上锁。
+landing:
+  strategy: "offboard_descent"
+  max_velocity: 0.30
+  max_acceleration: 0.40
+  flare_height: 0.30
+  flare_velocity: 0.15
+  touchdown_confirm_time: 1.0
+  auto_disarm: true
+  disarm_delay: 1.0
+  max_descent_distance: 10.0
+
+# 进入悬停时对齐规划器世界系与 PX4 本地世界系的平移和 yaw。
+frames:
+  align_planner_on_offboard_entry: true
+
+# 以地面安全原点为参考的规划指令地理围栏。
+limits:
+  max_horizontal_distance: 10.0
+  max_height_above_origin: 3.0
+  min_height_below_origin: -0.30
+
+# 关键故障时停止 setpoint，让 PX4 自身的 OFFBOARD-loss failsafe 接管。
+failsafe:
+  stop_setpoints_on_critical_failure: true
+
+# 解锁、上锁和模式切换服务的最小重试间隔，单位为秒。
+requests:
+  retry_interval: 1.0
+
+# MAVROS 连接后逐项调用 /mavros/set_message_interval 设置消息频率。
+# enabled=false：跳过该项；required=true：重试失败后在 /diagnostics 报 ERROR。
+# 该列表可增删，不需要重新编译。
+message_intervals:
+  enabled: true
+  reapply_on_reconnect: true
+  retry_count: 3
+  retry_delay: 0.5
+  messages:
+    - {name: "ATTITUDE_QUATERNION", id: 31, rate: 100.0, enabled: true, required: false}
+    - {name: "LOCAL_POSITION_NED", id: 32, rate: 50.0, enabled: true, required: true}
+    - {name: "RC_CHANNELS", id: 65, rate: 20.0, enabled: true, required: false}
+    - {name: "HIGHRES_IMU", id: 105, rate: 50.0, enabled: false, required: false}
+    - {name: "BATTERY_STATUS", id: 147, rate: 10.0, enabled: true, required: false}
+    - {name: "EXTENDED_SYS_STATE", id: 245, rate: 5.0, enabled: true, required: true}
+    - {name: "SYS_STATUS", id: 1, rate: 2.0, enabled: true, required: false}

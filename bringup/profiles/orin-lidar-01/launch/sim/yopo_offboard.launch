@@ -1,0 +1,20 @@
+<launch>
+  <arg name="yopo_config"
+       default="$(dirname)/../../config/sim/yopo.yaml"/>
+  <arg name="offboard_fsm_config"
+       default="$(dirname)/../../config/sim/offboard_fsm.yaml"/>
+
+  <!-- Gazebo、PX4 SITL、MAVROS 和真值里程计桥接由仿真电脑负责。
+       本文件只在 Orin 上启动 YOPO 和 OFFBOARD FSM。 -->
+  <include file="$(find yopo_planner)/launch/yopo_planner.launch">
+    <arg name="config_file" value="$(arg yopo_config)"/>
+  </include>
+
+  <node pkg="px4ctrl"
+        type="offboard_fsm_node"
+        name="px4_offboard_fsm"
+        output="screen"
+        required="true">
+    <rosparam command="load" file="$(arg offboard_fsm_config)"/>
+  </node>
+</launch>

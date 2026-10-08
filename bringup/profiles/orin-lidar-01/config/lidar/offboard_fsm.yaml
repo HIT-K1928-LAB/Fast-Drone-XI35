@@ -1,0 +1,141 @@
+# orin-lidar-01：FAST-LIVO 定位模式的 PX4 原生 OFFBOARD 状态机配置。
+# 本节点只管理起飞、悬停、规划接管和降落流程，位置/速度/姿态闭环由 PX4 完成。
+schema_version: 1
+
+# 节点主循环。50 Hz 用于持续满足 PX4 的 OFFBOARD setpoint 要求。
+node:
+  control_rate: 50.0
+  status_rate: 10.0
+  start_enabled: true
+  prestream_when_ready: true
+  prestream_min_time: 1.2
+  # false：由遥控器/地面站切 OFFBOARD；true：起飞命令可自动请求 OFFBOARD。
+  request_offboard_automatically: true
+
+# ROS 接口。px4_odometry 是统一的规划与控制反馈；livo_odometry 仅保留
+# 为诊断原始 FAST-LIVO 输出，不再用于规划坐标系对齐。
+topics:
+  mavros_state: "/mavros/state"
+  extended_state: "/mavros/extended_state"
+  px4_odometry: "/mavros/local_position/odom"
+  # FAST-LIVO 已输出飞控机体位姿，EGO-Planner 也工作在该世界坐标系。
+  livo_odometry: "/LIVO2/imu_propagate"
+  rc_input: "/mavros/rc/in"
+  planner_command: "/position_cmd"
+  planner_emergency_hover: "/planning/Emergency_hover"
+  fsm_command: "/offboard_fsm/command"
+  planner_lifecycle: "/px4ctrl/takeoff_land"
+  # 自动起飞稳定进入 HOVER 时发布一次，通知 YOPO 开始输出轨迹。
+  traj_start_trigger: "/traj_start_trigger"
+  setpoint: "/mavros/setpoint_raw/local"
+  status: "/offboard_fsm/status"
+  reference: "/offboard_fsm/reference"
+  diagnostics: "/diagnostics"
+
+services:
+  arming: "/mavros/cmd/arming"
+  set_mode: "/mavros/set_mode"
+  message_interval: "/mavros/set_message_interval"
+
+# 所有超时单位均为秒。PX4 里程计超时属于关键故障，会停止发送 setpoint。
+timeouts:
+  mavros_state: 2.5
+  extended_state: 2.0
+  # LOCAL_POSITION_NED 偶发成组到达；0.80 s 可过滤短暂回传抖动，
+  # LANDING/DISARMING 仍由各自的锁存安全逻辑管理。
+  px4_odometry: 0.80
+  livo_odometry: 0.80
+  planner_command: 0.80
+  rc_input: 0.5
+  arm_request: 5.0
+  disarm_request: 5.0
+  takeoff: 20.0
+  landing: 30.0
+
+# 单一遥控器起降开关：消抖后的激活沿在 GROUND 状态触发起飞，
+# 在 ARMING/TAKEOFF/HOVER/EXTERNAL/BRAKE 状态触发降落。
+# index_base=1 时，channel 7 对应 mavros_msgs/RCIn.channels[6]。
+rc:
+  enabled: true
+  index_base: 1
+  debounce_time: 0.15
+  require_release_before_trigger: true
+  takeoff_land:
+    channel: 9
+    reversed: false
+    trigger_pwm: 1700
+    release_pwm: 1300
+
+# 自动起飞采用限速、限加速度、限 jerk 的平滑垂直轨迹。
+takeoff:
+  relative_height: 2.0
+  max_velocity: 1.0
+  max_acceleration: 0.5
+  max_jerk: 1.0
+  position_tolerance: 0.08
+  velocity_tolerance: 0.12
+  stable_time: 1.0
+
+# 外部规划器接管条件和安全边界。指令超时或非法时进入 BRAKE，再转 HOVER。
+# 高机动水平包线与 PX4 保持一致：20 m/s、10 m/s^2。
+# 20 m/s 下按 10 m/s^2 刹停的理论最短距离约 20 m，规划器必须预留该距离；
+# 本节点的地理围栏只负责拒绝越界指令，不会生成避障刹停轨迹。
+planner:
+  activation_messages: 3
+  max_position_jump: 0.5
+  max_yaw_jump_deg: 30.0
+  max_velocity: 20.0
+  max_acceleration: 40.0
+  brake_acceleration: 10.0
+  brake_velocity_tolerance: 0.15
+  brake_stable_time: 0.5
+
+# OFFBOARD 自动降落参数。确认着陆后可自动上锁。
+landing:
+  strategy: "offboard_descent"
+  max_velocity: 0.30
+  max_acceleration: 0.40
+  flare_height: 0.30
+  # 到达地面以下的位置限位后仍持续发送该下降速度，供 PX4 落地检测。
+  # 必须满足 flare_velocity > 1.1 * LNDMC_Z_VEL_MAX；当前为 0.15 > 0.11。
+  flare_velocity: 0.15
+  touchdown_confirm_time: 1.0
+  auto_disarm: true
+  disarm_delay: 1.0
+  max_descent_distance: 10.0
+
+# YOPO/YOLO 已直接使用 PX4 EKF 本地世界系，禁止再次做 LIVO->PX4 变换。
+frames:
+  align_planner_on_offboard_entry: false
+
+# 以地面安全原点为参考的规划指令地理围栏。
+limits:
+  max_horizontal_distance: 100.0
+  # Match the EGO map's approximately 0--10 m usable height interval.
+  max_height_above_origin: 10.0
+  min_height_below_origin: -0.50
+
+# 关键故障时停止 setpoint，让 PX4 自身的 OFFBOARD-loss failsafe 接管。
+failsafe:
+  stop_setpoints_on_critical_failure: true
+
+# 解锁、上锁和模式切换服务的最小重试间隔，单位为秒。
+requests:
+  retry_interval: 1.0
+
+# MAVROS 连接后逐项调用 /mavros/set_message_interval 设置消息频率。
+# enabled=false：跳过该项；required=true：重试失败后在 /diagnostics 报 ERROR。
+# 该列表可增删，不需要重新编译。
+message_intervals:
+  enabled: true
+  reapply_on_reconnect: true
+  retry_count: 3
+  retry_delay: 0.5
+  messages:
+    - {name: "ATTITUDE_QUATERNION", id: 31, rate: 100.0, enabled: false, required: false}
+    - {name: "LOCAL_POSITION_NED", id: 32, rate: 50.0, enabled: true, required: true}
+    - {name: "RC_CHANNELS", id: 65, rate: 20.0, enabled: true, required: false}
+    - {name: "HIGHRES_IMU", id: 105, rate: 50.0, enabled: false, required: false}
+    - {name: "BATTERY_STATUS", id: 147, rate: 10.0, enabled: true, required: false}
+    - {name: "EXTENDED_SYS_STATE", id: 245, rate: 5.0, enabled: true, required: true}
+    - {name: "SYS_STATUS", id: 1, rate: 2.0, enabled: true, required: false}

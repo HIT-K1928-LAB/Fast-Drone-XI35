@@ -1,0 +1,111 @@
+# orin-lidar-01 的 YOPO-Simple 实机配置。
+# 本文件是该机型 YOPO 的唯一配置入口，上层 launch 只传入本文件路径。
+
+# ONNX 保留在算法包中；TensorRT engine 与 ONNX 放在同一目录。
+# engine 只是当前 Orin/TensorRT 环境的本地生成物，不纳入 Git。
+# engine 不存在或无法反序列化时，YOPO 会从 ONNX 自动重建并写回该路径。
+onnx_file: "$(find yopo_planner)/model/yopo.onnx"
+engine_file: "$(find yopo_planner)/model/yopo.engine"
+fp16: true
+
+# 数据接口。规划、目标跟踪和 OFFBOARD 控制统一使用 PX4 EKF 本地
+# 里程计，避免 FAST-LIVO 短时跳变与 PX4 EKF reset 后出现双参考系。
+odom_topic: "/mavros/local_position/odom"
+depth_topic: "/camera/depth/image_rect_raw"
+ctrl_topic: "/position_cmd"
+# YOLO、手动脚本与不同规划器共用的三维 PoseStamped 目标入口。
+goal_topic: "/planning/goal"
+dynamic_target_topic: "/yolo_trt/tracked_target"
+dynamic_target_status_topic: "/yolo_trt/target_status"
+target_mask_topic: "/yolo_trt/tracked_target_mask"
+# 状态话题异常时的后备超时。正常短时漏检由 YOLO 的 COASTING 状态
+# 继续输出预测目标，真正 LOST 后 YOPO 才刹停。
+dynamic_target_timeout: 0.8
+# 感知层之外的独立安全门：TENTATIVE/LOST、超速、超距或高协方差目标
+# 均不能进入滚动规划，已有跟踪任务会立即转入平滑刹停。
+dynamic_target_max_speed: 4.0
+dynamic_target_max_range: 18.0
+dynamic_target_max_position_variance: 0.50
+traj_start_topic: "/traj_start_trigger"
+wait_for_traj_start_trigger: true
+require_explicit_goal: true
+pause_with_fsm: true
+fsm_status_timeout: 0.8
+
+# D455 深度光学坐标系到飞控机体系的完整外参：
+#   p_body = R_body_depth * p_depth + t_body_depth
+# 由 MID360→D455 RGB 标定、MID360→FCU IMU 标定以及当前 D455 的
+# Depth→Color 厂内外参串联计算得到。YOPO 当前轨迹模型使用其中的旋转；
+# 平移同时保留在配置中，便于后续杆臂补偿和外参审计。
+camera_extrinsic:
+  rotation_body_depth: [0.036261566,  0.011340975,  0.999278791,
+                        0.999341516, -0.001017994, -0.036252375,
+                        0.000605743,  0.999934636, -0.011370309]
+  translation_body_depth: [0.044099153, -0.048871726, -0.089902311]
+require_camera_extrinsic: true
+pitch_angle_deg: 0.0
+
+# D455 绕光轴倒置安装。将原始深度图旋转 180° 恢复为网络训练时的
+# 正向图像；节点会同时在内部组合等价的光学坐标系旋转，无需修改标定外参。
+rotate_depth_180: true
+
+# D455 只把 0.5～10 m 作为物理有效深度；超出范围、NaN 和 Inf 会先
+# 由邻近有效深度填充。YOPO-Simple 预训练模型仍使用 20 m 归一化尺度，
+# 即所有最终有效深度输入都除以 20.0。网络输入尺寸保持 160×96。
+sensor_min_depth: 0.5
+sensor_reliable_max_depth: 10.0
+model_depth_max: 20.0
+depth_replan_rate: 10.0
+
+# 飞行与控制参数。通过 PX4 原生位置控制器执行时从连续参考状态规划。
+velocity: 3.0
+radio_range: 5.0  # YOPO-Simple 预训练模型的训练尺度，不随实飞速度缩小
+ctrl_dt: 0.02
+arrive_distance: 1.5
+# 进入到达半径后锁定位置，仅让机头持续转向目标点。
+arrival_yaw_rate: 0.8  # rad/s，约 45.8 deg/s
+arrival_yaw_min_distance: 0.3  # m，水平距离更小时保持进入到达区时的 yaw
+
+# 动态跟踪时机头直接朝向预测目标，不再与运动基元速度方向混合。
+# yaw 同时限制角速度和角加速度，避免目标更新造成抽动。
+dynamic_target_yaw_rate: 1.2  # rad/s，约 68.8 deg/s
+dynamic_target_yaw_accel: 2.5  # rad/s^2
+dynamic_target_yaw_deadband_deg: 1.0
+
+# YOPO 网络追踪的牵引点位于目标机前方 1.2 m；进入该距离前提前按
+# 当前速度计算刹车余量，随后定点并继续让相机朝向目标。
+dynamic_target_standoff_distance: 1.2
+dynamic_target_standoff_hysteresis: 0.25
+
+# 短时漏检期间继续滚动规划，并随 COASTING 持续时间逐渐缩短轨迹。
+dynamic_target_min_speed_scale: 0.35
+dynamic_target_coast_slowdown_time: 1.5
+
+# 硬丢失后先完成平移刹停，再围绕最后目标方位小幅原地搜索。
+dynamic_target_search_enabled: true
+dynamic_target_search_yaw_amplitude_deg: 25.0
+dynamic_target_search_yaw_rate: 0.5  # rad/s，约 28.6 deg/s
+
+# YOLO 的跟踪框掩膜带图像时间戳。只对新鲜掩膜区域做背景深度修复，
+# 防止目标机在远处被 YOPO 同时当作目标和静态障碍物。
+target_mask_enabled: true
+target_mask_timeout: 0.25
+target_mask_inpaint_radius: 3.0
+
+# 动态跟踪目标是同一飞行任务内的滚动更新，不能因每个新目标重启
+# “刹停→原地转向”。机头继续随连续规划轨迹转向。
+goal_yaw_alignment_enabled: false
+goal_yaw_align_enter_deg: 35.0
+goal_yaw_align_rate: 0.8  # rad/s，约 45.8 deg/s
+goal_yaw_brake_speed_tolerance: 0.15  # m/s
+goal_yaw_brake_stable_time: 0.3  # s
+goal_yaw_align_min_distance: 0.5  # m
+plan_from_reference: true
+
+visualize: true
+verbose: false
+
+# 启动默认目标仅用于初始化；首次飞行前应先发布真实目标点。
+goal_x: 0.0
+goal_y: 0.0
+goal_z: 1.0

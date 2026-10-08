@@ -1,0 +1,16 @@
+<launch>
+  <arg name="vrpn_server" default="192.168.31.15"/>
+  <arg name="config_file"
+       default="$(dirname)/../../config/mocap/motion_capture.yaml"/>
+
+  <include file="$(find vrpn_client_ros)/launch/sample.launch">
+    <arg name="server" value="$(arg vrpn_server)"/>
+  </include>
+
+  <node pkg="motion_capture"
+        type="motion_capture"
+        name="motion_capture"
+        output="screen">
+    <rosparam command="load" file="$(arg config_file)"/>
+  </node>
+</launch>
