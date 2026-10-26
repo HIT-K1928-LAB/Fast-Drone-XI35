@@ -1,0 +1,7 @@
+std_msgs/Header header
+uint64 generation
+float64 motion_epoch
+float64 trajectory_time
+float64 goal_distance
+float64 velocity_toward_goal
+float64 acceleration_norm

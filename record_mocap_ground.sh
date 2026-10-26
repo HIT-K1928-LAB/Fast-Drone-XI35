@@ -18,6 +18,24 @@ echo "Recording to: $BAG_NAME"
 } > "${BAG_NAME%.bag}_runtime.txt" 2>&1
 
 rosparam dump "${BAG_NAME%.bag}_params.yaml"
+
+# The recorder may start before MINCO. Save parameters again once its node is ready.
+(
+  while true; do
+    if rosparam get /yopo_minco_planner/velocity >/dev/null 2>&1 &&
+       rosnode ping -c 1 /yopo_minco_planner >/dev/null 2>&1; then
+      if rosparam dump "${BAG_NAME%.bag}_params_minco_ready.yaml"; then
+        echo "MINCO parameter snapshot saved."
+        break
+      fi
+    fi
+    sleep 2
+  done
+) &
+PARAM_SNAPSHOT_PID=$!
+# Do not leave the parameter watcher running after recording ends.
+trap 'kill "$PARAM_SNAPSHOT_PID" 2>/dev/null || true; wait "$PARAM_SNAPSHOT_PID" 2>/dev/null || true' EXIT
+
 rosbag record -O "$BAG_NAME" \
   /vrpn_client_node/orin08/pose \
   /vrpn_client_node/orin08/twist \
@@ -46,6 +64,10 @@ rosbag record -O "$BAG_NAME" \
   /yopo_minco/accepted_goal \
   /yopo_minco/stop \
   /yopo_minco/best_trajectory \
+  /yopo_minco/inner_point \
+  /yopo_minco/plan_diagnostics \
+  /yopo_minco/command_diagnostics \
+  /yopo_minco/debug/depth_input \
   /position_cmd \
   /yopo_minco/debug/position_cmd \
   /camera/depth/image_rect_raw \

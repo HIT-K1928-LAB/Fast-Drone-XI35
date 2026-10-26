@@ -3,6 +3,11 @@
 #include "yopo_minco_planner/recovery_gate.h"
 #include "yopo_minco_planner/StartGoal.h"
 #include <std_srvs/Trigger.h>
+#include <std_srvs/SetBool.h>
+#include "yopo_minco_planner/PlanDiagnostics.h"
+#include "yopo_minco_planner/CommandDiagnostics.h"
+#include "yopo_minco_planner/runtime_clock.h"
+#include "yopo_minco_planner/arrival_hold.h"
 #include <std_msgs/Bool.h>
 #include <sensor_msgs/Imu.h>
 #include <mavros_msgs/RCIn.h>
@@ -31,10 +36,6 @@
 #include <stdexcept>
 
 namespace yopo_minco_planner {
-using Clock = std::chrono::steady_clock;
-static double seconds(Clock::time_point a, Clock::time_point b) {
-    return std::chrono::duration<double>(a - b).count();
-}
 class YopoMincoNode {
   public:
     YopoMincoNode() : private_("~") {
@@ -50,8 +51,8 @@ class YopoMincoNode {
         private_.param("goal_min_distance", goal_min_, 0.5);
         private_.param("goal_max_distance", goal_max_, 2.);
         private_.param("arrive_distance", arrive_distance_, 0.25);
-        private_.param("arrive_speed", arrive_speed_, 0.15);
-        private_.param("arrive_hold", arrive_hold_, 0.5);
+        private_.param("arrival_yaw_rate", arrival_yaw_rate_, 0.8);
+        private_.param("arrival_yaw_min_distance", arrival_yaw_min_distance_, 0.3);
         private_.param("hover_speed", hover_speed_, 0.15);
         private_.param("min_depth", min_depth_, 0.04);
         private_.param("max_depth", max_depth_, 20.);
@@ -85,7 +86,7 @@ class YopoMincoNode {
 #undef PARAM
         const double positive[] = {plan_hz_,     ctrl_dt_,         sensor_timeout_, state_timeout_,
                                    skew_,        plan_timeout_,    tracking_error_, goal_min_,
-                                   goal_max_,    arrive_distance_, arrive_speed_,   arrive_hold_,
+                                   goal_max_,    arrive_distance_, arrival_yaw_rate_, arrival_yaw_min_distance_,
                                    hover_speed_, min_depth_,       max_depth_,      max_invalid_};
         for (double v : positive)
             if (!std::isfinite(v) || v <= 0) throw std::runtime_error("Invalid node parameter");
@@ -98,7 +99,10 @@ class YopoMincoNode {
             goal_min_ >= goal_max_ || ctrl_dt_ > 0.1 || plan_hz_ > 100 ||
             plan_timeout_ <= 1 / plan_hz_)
             throw std::runtime_error("Inconsistent node parameter bounds");
-        if (ros::Time::isSimTime())
+        private_.param("simulation_mode", simulation_, false);
+        if (simulation_ && !ros::Time::isSimTime())
+            throw std::runtime_error("Simulation requires /use_sim_time=true");
+        if (!simulation_ && ros::Time::isSimTime())
             throw std::runtime_error(
                 "Real-flight launch requires /use_sim_time=false; replay uses wall-time/restamped "
                 "input");
@@ -168,6 +172,9 @@ class YopoMincoNode {
         private_.param<std::string>("goal_topic", goal, "/move_base_simple/goal");
         private_.param<std::string>("trigger_topic", trigger, "/traj_start_trigger");
         private_.param<std::string>("stop_topic", stop, "/yopo_minco/stop");
+        if (simulation_ && (nh_.resolveName(state)!="/iris_0/mavros/state" ||
+                            nh_.resolveName(odom)!="/gazebo/iris_0/odometry"))
+            throw std::runtime_error("Simulation requires isolated Gazebo odom and SITL state topics");
         output_topic_ = execute_ ? "/position_cmd" : "/yopo_minco/debug/position_cmd";
         // Debug mode must never be remapped to the flight controller topic.
         if (!execute_ && nh_.resolveName(output_topic_) != output_topic_)
@@ -179,12 +186,20 @@ class YopoMincoNode {
         status_   = nh_.advertise<std_msgs::String>("/yopo_minco/status", 1, true);
         recovery_status_ = nh_.advertise<std_msgs::String>("/yopo_minco/recovery_state", 1, true);
         accepted_goal_ = nh_.advertise<geometry_msgs::PoseStamped>("/yopo_minco/accepted_goal", 1, true);
+        preprocessed_ = nh_.advertise<sensor_msgs::Image>("/yopo_minco/debug/depth_input", 1);
+        diagnostics_ = nh_.advertise<PlanDiagnostics>("/yopo_minco/plan_diagnostics", 10);
+        command_diagnostics_ = nh_.advertise<CommandDiagnostics>("/yopo_minco/command_diagnostics", 10);
+        if (simulation_) {
+            enable_service_ = nh_.advertiseService("/yopo_minco/sim_enable", &YopoMincoNode::simEnable, this);
+            enable_status_ = nh_.advertise<std_msgs::Bool>("/yopo_minco/sim_enabled", 1, true);
+            publishEnable();
+        }
         start_service_ = nh_.advertiseService("/yopo_minco/start_goal", &YopoMincoNode::startGoal, this);
         resume_service_ = nh_.advertiseService("/yopo_minco/resume", &YopoMincoNode::resume, this);
         fault_sub_ = nh_.subscribe("/kf_fusion/kf_fail", 1, &YopoMincoNode::faultCallback, this);
         vins_fault_sub_ = nh_.subscribe("/vins_fusion/vins_fail", 1, &YopoMincoNode::faultCallback, this);
         imu_watch_sub_ = nh_.subscribe("/imu_filter/data", 10, &YopoMincoNode::imuWatch, this);
-        rc_sub_ = nh_.subscribe("/mavros/rc/in", 1, &YopoMincoNode::rcCallback, this);
+        if (!simulation_) rc_sub_ = nh_.subscribe("/mavros/rc/in", 1, &YopoMincoNode::rcCallback, this);
         extended_sub_ = nh_.subscribe("/mavros/extended_state", 1, &YopoMincoNode::extendedCallback, this);
         takeoff_land_sub_ = nh_.subscribe("/px4ctrl/takeoff_land", 1, &YopoMincoNode::takeoffLandCallback, this);
         inner_point_ = nh_.advertise<geometry_msgs::PointStamped>("/yopo_minco/inner_point", 1);
@@ -201,6 +216,8 @@ class YopoMincoNode {
             depth, 1, &YopoMincoNode::depthCallback, this, ros::TransportHints().tcpNoDelay());
         timer_ =
             nh_.createWallTimer(ros::WallDuration(ctrl_dt_), &YopoMincoNode::controlCallback, this);
+        if (simulation_)
+            motion_timer_=nh_.createTimer(ros::Duration(ctrl_dt_), &YopoMincoNode::simControlCallback, this);
         publisher_timer_ =
             nh_.createWallTimer(ros::WallDuration(1.), &YopoMincoNode::publisherCheck, this);
         depth_spinner_ = std::make_unique<ros::AsyncSpinner>(1, &depth_queue_);
@@ -214,6 +231,32 @@ class YopoMincoNode {
     }
 
   private:
+    RuntimeStamp nowStamp() const {
+        return runtimeStamp(simulation_, ros::Time::now().toSec());
+    }
+    void publishEnable() {
+        if (!simulation_) return;
+        std_msgs::Bool msg; msg.data=sim_enabled_; enable_status_.publish(msg);
+    }
+    bool clockOK() const {
+        return !simulation_ || (clock_monitor_.ready(ros::Time::now().toSec(),
+            wallNow(), sensor_timeout_) && latched_fault_.empty());
+    }
+    bool simEnable(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!req.data) {
+            halt("simulation enable revoked");
+            res.success=true; res.message="disabled; task cancelled"; return true;
+        }
+        std::string reason;
+        if (!execute_ || active_ || !inputsOK(nowStamp(), &reason, true)) {
+            res.success=false; res.message="requires execute=true, idle and valid airborne SITL inputs: "+reason;
+            return true;
+        }
+        sim_enabled_=true; publishEnable();
+        res.success=true; res.message="enabled for next explicit StartGoal; STOP revokes enable";
+        return true;
+    }
     void publishStatus(const std::string& s) {
         std_msgs::String msg;
         msg.data = s;
@@ -222,13 +265,14 @@ class YopoMincoNode {
         recovery_status_.publish(msg);
     }
     void halt(const std::string& why) {
+        sim_enabled_=false; publishEnable();
         recovery_.stop(why);
         resume_requested_ = false;
         have_goal_ = false;  // A later unrelated trigger cannot restart the old task.
         active_    = false;
         have_plan_ = false;
         ++generation_;
-        arrival_since_ = Clock::time_point{};
+        arrival_.reset();
         publishStatus("STOP: " + why + "; commands released, no automatic resume");
     }
     bool singlePublisher() {
@@ -250,21 +294,25 @@ class YopoMincoNode {
         publisher_ok_ = ok;
         if (!ok && active_) halt("command publisher conflict/master unavailable");
     }
-    bool inputsOK(Clock::time_point now, std::string* reason) const {
+    bool inputsOK(RuntimeStamp now, std::string* reason, bool checking_enable=false) const {
+        if (!clockOK()) { *reason="simulation clock missing/stalled or faulted"; return false; }
         if (!latched_fault_.empty()) { *reason=latched_fault_; return false; }
-        if (recovery_enabled_ && (imu_received_==Clock::time_point{} ||
-            seconds(now,imu_received_)>sensor_timeout_ || imu_stamp_.isZero() ||
+        if (recovery_enabled_ && (imu_received_==RuntimeStamp{} ||
+            wallSeconds(now,imu_received_)>sensor_timeout_ || imu_stamp_.isZero() ||
             (ros::Time::now()-imu_stamp_).toSec() < -0.05 ||
             (ros::Time::now()-imu_stamp_).toSec() > sensor_timeout_)) {
             *reason="missing/stale monitored IMU"; return false;
         }
-        if (execute_ && (!rc_allowed_ || seconds(now,rc_received_)>0.5 ||
-            seconds(now,extended_received_)>2.0 ||
+        if (execute_ && ((simulation_ ? (!sim_enabled_ && !checking_enable) :
+                         (!rc_allowed_ || wallSeconds(now,rc_received_)>0.5)) ||
+            wallSeconds(now,extended_received_)>2.0 ||
             extended_.landed_state!=mavros_msgs::ExtendedState::LANDED_STATE_IN_AIR)) {
-            *reason="execution requires fresh neutral RC command mode and IN_AIR"; return false;
+            *reason=simulation_ ? "execution requires manual simulation enable and fresh IN_AIR" :
+                                   "execution requires fresh neutral RC command mode and IN_AIR";
+            return false;
         }
-        if (!have_odom_ || !have_depth_ || seconds(now, odom_received_) > sensor_timeout_ ||
-            seconds(now, depth_received_) > sensor_timeout_) {
+        if (!have_odom_ || !have_depth_ || wallSeconds(now, odom_received_) > sensor_timeout_ ||
+            wallSeconds(now, depth_received_) > sensor_timeout_) {
             *reason = "missing/stale odometry or depth";
             return false;
         }
@@ -288,7 +336,7 @@ class YopoMincoNode {
             *reason = "invalid odometry";
             return false;
         }
-        if (execute_ && (!publisher_ok_ || seconds(now, state_received_) > state_timeout_ ||
+        if (execute_ && (!publisher_ok_ || wallSeconds(now, state_received_) > state_timeout_ ||
                          !state_.connected || !state_.armed || state_.mode != "OFFBOARD")) {
             *reason =
                 "execution requires unique publisher and fresh connected/armed/OFFBOARD state";
@@ -306,12 +354,12 @@ class YopoMincoNode {
         std::lock_guard<std::mutex> lock(mutex_);
         odom_          = *msg;
         have_odom_     = true;
-        odom_received_ = Clock::now();
+        odom_received_ = nowStamp();
     }
     void stateCallback(const mavros_msgs::State::ConstPtr& msg) {
         std::lock_guard<std::mutex> lock(mutex_);
         state_          = *msg;
-        state_received_ = Clock::now();
+        state_received_ = nowStamp();
         if (execute_ && active_ && (!msg->connected || !msg->armed || msg->mode!="OFFBOARD"))
             halt("flight state lost; explicit new goal required");
     }
@@ -320,7 +368,7 @@ class YopoMincoNode {
         halt("user request");
     }
     double steadyNow() const {
-        return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+        return nowStamp().motion;
     }
     double measuredYaw() const {
         const auto& q=odom_.pose.pose.orientation;
@@ -340,11 +388,11 @@ class YopoMincoNode {
             if (active_) halt(latched_fault_);
         }
         if (msg->header.stamp>imu_stamp_) imu_stamp_=msg->header.stamp;
-        imu_received_=Clock::now();
+        imu_received_=nowStamp();
     }
     void rcCallback(const mavros_msgs::RCIn::ConstPtr& msg) {
         std::lock_guard<std::mutex> lock(mutex_);
-        rc_received_=Clock::now();
+        rc_received_=nowStamp();
         rc_allowed_=msg->channels.size()>=8;
         if (rc_allowed_) {
             rc_allowed_=msg->channels[4]>1750 && msg->channels[5]>1750;
@@ -355,7 +403,7 @@ class YopoMincoNode {
     }
     void extendedCallback(const mavros_msgs::ExtendedState::ConstPtr& msg) {
         std::lock_guard<std::mutex> lock(mutex_);
-        extended_=*msg; extended_received_=Clock::now();
+        extended_=*msg; extended_received_=nowStamp();
         if (execute_ && active_ && msg->landed_state!=mavros_msgs::ExtendedState::LANDED_STATE_IN_AIR)
             halt("vehicle is not IN_AIR");
     }
@@ -364,8 +412,8 @@ class YopoMincoNode {
         if (active_) halt("takeoff/landing request; task cancelled");
     }
     bool startTask(std::string* detail) {  // Caller holds mutex_.
-        if (active_) { *detail="task busy; stop it explicitly before a new goal"; return false; }
-        auto now=Clock::now();
+        if (active_ && !arrival_.active) { *detail="task busy; stop it explicitly before a new goal"; return false; }
+        auto now=nowStamp();
         if (!have_goal_) { *detail="no goal"; return false; }
         if (!inputsOK(now,detail)) return false;
         const auto p=position(); const double distance=(goal_-p).norm();
@@ -380,7 +428,7 @@ class YopoMincoNode {
             *detail="trigger limits rejected: "+info.str(); return false;
         }
         origin_=p; active_=true; have_plan_=false; start_time_=now;
-        arrival_since_=Clock::time_point{}; ++generation_;
+        arrival_.reset(); ++generation_;
         recovery_.start(distance); resume_requested_=false;
         last_yaw_=measuredYaw(); last_yaw_rate_=0; last_control_=now;
         geometry_msgs::PoseStamped accepted;
@@ -395,17 +443,22 @@ class YopoMincoNode {
         std::lock_guard<std::mutex> lock(mutex_);
         Eigen::Vector3d g(req.goal.pose.position.x,req.goal.pose.position.y,req.goal.pose.position.z);
         const double age=(ros::Time::now()-req.goal.header.stamp).toSec();
-        if (active_ || req.goal.header.frame_id!="world" || !g.allFinite() ||
+        if ((active_ && !arrival_.active) || req.goal.header.frame_id!="world" || !g.allFinite() ||
             req.goal.header.stamp.isZero() || age < -0.05 || age>1.0) {
             res.success=false; res.message="busy or invalid/stale world goal; nothing started";
             return true;
         }
         // Selection and activation are atomic: no stale goal/trigger race.
+        const auto previous_goal=goal_; const bool previous_have_goal=have_goal_;
         goal_=g; have_goal_=true; res.success=startTask(&res.message);
-        if (!res.success) { have_goal_=false; ROS_WARN_STREAM(res.message); }
+        if (!res.success) {
+            goal_=previous_goal; have_goal_=previous_have_goal;
+            ROS_WARN_STREAM(res.message);
+        }
         return true;
     }
     void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+        if (simulation_) { ROS_WARN("Simulation uses atomic StartGoal only"); return; }
         std::lock_guard<std::mutex> lock(mutex_);
         if (active_) { ROS_WARN("Stop current task before setting another goal"); return; }
         Eigen::Vector3d g(msg->pose.position.x,msg->pose.position.y,msg->pose.position.z);
@@ -416,6 +469,7 @@ class YopoMincoNode {
         publishStatus("GOAL_SET: waiting for explicit trajectory trigger");
     }
     void triggerCallback(const geometry_msgs::PoseStamped::ConstPtr&) {
+        if (simulation_) return;
         std::lock_guard<std::mutex> lock(mutex_);
         if (active_) return; // Triggers cannot bypass recovery readiness.
         std::string reason;
@@ -424,10 +478,10 @@ class YopoMincoNode {
     bool resume(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res) {
         std::lock_guard<std::mutex> lock(mutex_);
         std::string reason;
-        if (!active_ || !recovery_.freshReady(steadyNow()) || !inputsOK(Clock::now(),&reason)) {
+        if (!active_ || !recovery_.freshReady(steadyNow()) || !inputsOK(nowStamp(),&reason)) {
             res.success=false; res.message="not fresh READY or inputs invalid: "+reason; return true;
         }
-        resume_requested_=true; resume_request_time_=Clock::now();
+        resume_requested_=true; resume_request_time_=nowStamp();
         res.success=true; res.message="confirmation received; a NEW valid plan is still required";
         return true;
     }
@@ -458,7 +512,7 @@ class YopoMincoNode {
         publishStatus("WAIT_HOVER: "+reason+"; commands released; attempt="+
                       std::to_string(recovery_.attempts));
     }
-    bool prepareDepth(const sensor_msgs::Image& msg, Depth* output) const {
+    bool prepareDepth(const sensor_msgs::Image& msg, Depth* output, double* invalid_fraction) const {
         if (msg.width != unsigned(width_) || msg.height != unsigned(height_) || msg.is_bigendian)
             return false;
         int bytes = msg.encoding == "16UC1" ? 2 : msg.encoding == "32FC1" ? 4 : 0;
@@ -484,7 +538,8 @@ class YopoMincoNode {
                 }
                 depth.at<float>(y, x) = d;
             }
-        if (double(invalid) / (size_t(width_) * height_) > max_invalid_) return false;
+        *invalid_fraction=double(invalid)/(size_t(width_)*height_);
+        if (*invalid_fraction > max_invalid_) return false;
         cv::Mat resized, mask, normalized, u8, filled;
         cv::resize(depth, resized, cv::Size(160, 96), 0, 0, cv::INTER_NEAREST);
         mask = resized < min_depth_;
@@ -499,12 +554,18 @@ class YopoMincoNode {
             for (int x = 0; x < 160; ++x)
                 u8.at<uint8_t>(y, x) = static_cast<uint8_t>(normalized.at<float>(y, x) * 255.f);
         cv::inpaint(u8, mask, filled, 1, cv::INPAINT_NS);
+        if (preprocessed_.getNumSubscribers()) {
+            sensor_msgs::Image input; input.header=msg.header; input.width=160; input.height=96;
+            input.encoding="mono8"; input.step=160;
+            input.data.assign(filled.datastart,filled.dataend);
+            preprocessed_.publish(input);
+        }
         for (int y = 0; y < 96; ++y)
             for (int x = 0; x < 160; ++x) (*output)[y * 160 + x] = filled.at<uint8_t>(y, x) / 255.f;
         return true;
     }
     void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
-        auto started = Clock::now();
+        auto started = nowStamp();
         PlanningState snapshot;
         uint64_t generation;
         {
@@ -518,6 +579,13 @@ class YopoMincoNode {
             have_depth_     = true;
             depth_stamp_    = msg->header.stamp;
             depth_received_ = started;
+            if (arrival_.active) {
+                // Keep depth validity/freshness checks, but never infer/replan during hold.
+                Depth unused; double invalid_fraction;
+                if (!prepareDepth(*msg, &unused, &invalid_fraction))
+                    halt("invalid depth dimensions/encoding/values during arrival hold");
+                return;
+            }
             if (!active_ || seconds(started, last_plan_attempt_) < 1 / plan_hz_) return;
             last_plan_attempt_ = started;
             std::string reason;
@@ -554,19 +622,49 @@ class YopoMincoNode {
         NetworkOutput out;
         Plan candidate;
         std::string error;
-        bool ok = prepareDepth(*msg, &depth);
+        bool inferred = false;
+        double invalid_fraction=-1;
+        bool ok = prepareDepth(*msg, &depth, &invalid_fraction);
         if (!ok) error = "invalid depth dimensions/encoding/values";
         if (ok) {
             ok = engine_.infer(depth, planner_->observation(snapshot), &out);
+            inferred=ok;
             if (!ok) error = "TensorRT inference failed";
         }
         if (ok) ok = planner_->plan(snapshot, out, &candidate, &error);
-        auto finished = Clock::now();
+        auto finished = nowStamp();
+        PlanDiagnostics diagnostic;
+        diagnostic.header=msg->header; diagnostic.header.frame_id="world";
+        diagnostic.generation=generation;
+        diagnostic.depth_invalid_fraction=invalid_fraction;
+        diagnostic.inference_ok=inferred; diagnostic.plan_ok=ok;
+        diagnostic.reason=error; diagnostic.selected_action=-1;
+        diagnostic.planning_wall_ms=wallSeconds(finished,started)*1000;
+        diagnostic.motion_epoch=started.motion;
+        diagnostic.goal.x=snapshot.goal.x(); diagnostic.goal.y=snapshot.goal.y(); diagnostic.goal.z=snapshot.goal.z();
+        diagnostic.origin.x=snapshot.origin.x(); diagnostic.origin.y=snapshot.origin.y(); diagnostic.origin.z=snapshot.origin.z();
+        for(int r=0;r<3;++r) for(int c=0;c<3;++c) {
+            diagnostic.head[r*3+c]=snapshot.head(r,c);
+            diagnostic.rotation_wc[r*3+c]=snapshot.rotation_wc(r,c);
+        }
+        if(inferred) {
+            std::copy(out.endstate.begin(),out.endstate.end(),diagnostic.endstate.begin());
+            std::copy(out.score.begin(),out.score.end(),diagnostic.score.begin());
+            std::copy(out.radius.begin(),out.radius.end(),diagnostic.radius.begin());
+        }
+        if(ok) {
+            diagnostic.selected_action=candidate.action;
+            diagnostic.t1=candidate.trajectory.firstDuration();
+            diagnostic.t2=candidate.trajectory.duration()-diagnostic.t1;
+            const auto inner=candidate.trajectory.evaluate(diagnostic.t1);
+            diagnostic.inner.x=inner.x(); diagnostic.inner.y=inner.y(); diagnostic.inner.z=inner.z();
+        }
+        diagnostics_.publish(diagnostic);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (!active_ || generation != generation_)
                 return;  // Ignore work completed after a stop/new task.
-            if (seconds(finished, started) > plan_timeout_) {
+            if (wallSeconds(finished, started) > plan_timeout_) {
                 halt("planning latency exceeded budget");
                 return;
             }
@@ -614,7 +712,7 @@ class YopoMincoNode {
         }
         ROS_INFO_THROTTLE(
             1., "MINCO plan %.2f ms, action=%d, duration=%.3f s, score=%.4f, predicted mu=%.4f",
-            seconds(finished, started) * 1000, candidate.action, candidate.trajectory.duration(),
+            wallSeconds(finished, started) * 1000, candidate.action, candidate.trajectory.duration(),
             candidate.score, candidate.corridor_mu);
         publishPath(candidate);
     }
@@ -645,43 +743,76 @@ class YopoMincoNode {
     }
     void controlCallback(const ros::WallTimerEvent&) {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (simulation_) {
+            const double sim_now=ros::Time::now().toSec();
+            if (!clock_monitor_.observe(sim_now, wallNow())) {
+                const std::string why="simulation clock moved backwards; restart required";
+                if (latched_fault_!=why || active_ || sim_enabled_) {
+                    latched_fault_=why; halt(why);
+                }
+                return;
+            }
+            if (!clockOK() && (active_ || sim_enabled_)) {
+                halt("simulation clock stalled; new enable and goal required"); return;
+            }
+        }
+        if (simulation_) return; // Simulation motion is scheduled by ROS time, not wall callbacks.
+        controlStepLocked();
+    }
+    void simControlCallback(const ros::TimerEvent&) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        controlStepLocked();
+    }
+    void controlStepLocked() {
+        if (simulation_ && sim_enabled_ && !active_) {
+            std::string why;
+            if (!inputsOK(nowStamp(), &why)) { halt("simulation enable invalidated: "+why); return; }
+        }
         if (!active_) return;
-        auto now = Clock::now();
+        auto now = nowStamp();
+        if (simulation_ && seconds(now,last_control_)<=0) return;
         std::string reason;
         if (!inputsOK(now, &reason)) {
             halt(reason);
             return;
         }
-        if ((position() - goal_).norm() < arrive_distance_ && velocity().norm() < arrive_speed_) {
-            if (arrival_since_ == Clock::time_point{}) arrival_since_ = now;
-            if (seconds(now, arrival_since_) >= arrive_hold_) {
-                halt("arrived and settled");
-                return;
-            }
-        } else
-            arrival_since_ = Clock::time_point{};
+        // Recovery deliberately releases commands: last_control_ is not a scheduling clock here.
+        // Radius entry must not bypass the explicit recovery readiness/confirmation gates.
         if (recovery_.recovering()) { recoveryUpdate(); return; }
-        if (!have_plan_) {
-            if (seconds(now, start_time_) > plan_timeout_) halt("first plan timeout");
-            return;
-        }
-        double t = seconds(now, plan_epoch_);
-        if (t > plan_timeout_ || t >= plan_.trajectory.duration()) {
-            halt("plan stale/expired");
-            return;
-        }
         double dt = seconds(now, last_control_);
         if (dt <= 0 || dt > sensor_timeout_) {
             halt("control scheduling gap");
             return;
         }
-        auto p = plan_.trajectory.evaluate(t, 0), v = plan_.trajectory.evaluate(t, 1),
-             a = plan_.trajectory.evaluate(t, 2), j = plan_.trajectory.evaluate(t, 3);
+        if (arrival_.enter(position(), goal_, measuredYaw(), arrive_distance_, arrival_yaw_min_distance_)) {
+            have_plan_=false; resume_requested_=false; ++generation_;
+            last_yaw_=arrival_.yaw; last_yaw_rate_=0;
+            publishStatus("ARRIVAL_HOLD: radius entered; holding entry position and turning toward goal; not a settled confirmation");
+        }
+        double t=-1.0;
+        Eigen::Vector3d p, v=Eigen::Vector3d::Zero(), a=v, j=v;
+        std::pair<double,double> yaw;
+        if (arrival_.active) {
+            p=arrival_.position;
+            yaw=arrival_.advance(dt, arrival_yaw_rate_);
+        } else {
+            if (!have_plan_) {
+                if (seconds(now, start_time_) > plan_timeout_) halt("first plan timeout");
+                return;
+            }
+            t=seconds(now, plan_epoch_);
+            if (t > plan_timeout_ || t >= plan_.trajectory.duration()) {
+                halt("plan stale/expired");
+                return;
+            }
+            p=plan_.trajectory.evaluate(t,0); v=plan_.trajectory.evaluate(t,1);
+            a=plan_.trajectory.evaluate(t,2); j=plan_.trajectory.evaluate(t,3);
+            yaw=YopoPlanner::yaw(v, goal_-p, last_yaw_, last_yaw_rate_, dt);
+        }
         if ((p - position()).norm() > tracking_error_ || !planner_->check(p, v, a, j, origin_)) {
             halt("reference tracking or motion limit");
             return;
         }
-        auto yaw      = YopoPlanner::yaw(v, goal_ - p, last_yaw_, last_yaw_rate_, dt);
         last_yaw_     = yaw.first;
         last_yaw_rate_ = yaw.second;
         last_control_ = now;
@@ -704,7 +835,18 @@ class YopoMincoNode {
         cmd.yaw             = yaw.first;
         cmd.yaw_dot         = yaw.second;
         commands_.publish(cmd);
+        CommandDiagnostics d; d.header=cmd.header; d.generation=generation_;
+        d.trajectory_time=t; d.motion_epoch=plan_epoch_.motion;
+        d.goal_distance=(goal_-position()).norm();
+        const Eigen::Vector3d delta=goal_-position();
+        d.velocity_toward_goal=delta.norm()>1e-9 ? v.dot(delta/delta.norm()) : 0.0;
+        d.acceleration_norm=a.norm();
+        command_diagnostics_.publish(d);
     }
+    bool simulation_=false, sim_enabled_=false;
+    ClockMonitor clock_monitor_;
+    ros::ServiceServer enable_service_;
+    ros::Publisher enable_status_, diagnostics_, command_diagnostics_, preprocessed_;
     ros::NodeHandle nh_, private_, depth_nh_;
     ros::CallbackQueue depth_queue_;
     std::unique_ptr<ros::AsyncSpinner> depth_spinner_;
@@ -712,13 +854,15 @@ class YopoMincoNode {
     ros::ServiceServer start_service_, resume_service_;
     ros::Subscriber fault_sub_, vins_fault_sub_, imu_watch_sub_, rc_sub_, extended_sub_, takeoff_land_sub_;
     RecoveryGate recovery_;
+    ArrivalHold arrival_;
     bool recovery_enabled_=true, auto_resume_=false, resume_requested_=false, rc_allowed_=false;
     std::string latched_fault_;
     ros::Time imu_stamp_;
-    Clock::time_point imu_received_{}, rc_received_{}, extended_received_{}, resume_request_time_{};
+    RuntimeStamp imu_received_{}, rc_received_{}, extended_received_{}, resume_request_time_{};
     mavros_msgs::ExtendedState extended_;
     ros::Subscriber odom_sub_, depth_sub_, state_sub_, goal_sub_, trigger_sub_, stop_sub_;
     ros::WallTimer timer_, publisher_timer_;
+    ros::Timer motion_timer_;
     std::mutex mutex_;
     PlannerConfig config_;
     std::unique_ptr<YopoPlanner> planner_;
@@ -734,12 +878,12 @@ class YopoMincoNode {
          publisher_ok_   = true;
     uint64_t generation_ = 0;
     ros::Time depth_stamp_;
-    Clock::time_point odom_received_{}, depth_received_{}, state_received_{}, plan_epoch_{},
-        start_time_{}, arrival_since_{}, last_plan_attempt_{}, last_control_{};
+    RuntimeStamp odom_received_{}, depth_received_{}, state_received_{}, plan_epoch_{},
+        start_time_{}, last_plan_attempt_{}, last_control_{};
     std::string engine_file_, output_topic_;
     int width_ = 640, height_ = 480;
     double plan_hz_, ctrl_dt_, sensor_timeout_, state_timeout_, skew_, plan_timeout_,
-        tracking_error_, goal_min_, goal_max_, arrive_distance_, arrive_speed_, arrive_hold_,
+        tracking_error_, goal_min_, goal_max_, arrive_distance_, arrival_yaw_rate_, arrival_yaw_min_distance_,
         hover_speed_;
     double min_depth_, max_depth_, sensor_reliable_max_depth_, max_invalid_, last_yaw_ = 0, last_yaw_rate_ = 0;
 };
@@ -750,6 +894,7 @@ int main(int argc, char** argv) {
         yopo_minco_planner::YopoMincoNode node;
         ros::spin();
     } catch (const std::exception& e) {
+        std::cerr << "YOPO-MINCO startup rejected: " << e.what() << std::endl;
         ROS_FATAL_STREAM(e.what());
         return 1;
     }

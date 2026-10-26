@@ -7,6 +7,8 @@
   <arg name="camera_extrinsic_config" default="/root/Fast-Drone-XI35/src/realflight_modules/VINS-Fusion-gpu/config/fast_drone_250.yaml"/>
   <node pkg="yopo_minco_planner" type="yopo_minco_node" name="yopo_minco_planner" output="screen" required="true">
     <rosparam command="load" file="$(arg config_file)"/>
+    <!-- Real hardware must keep RC gating and monotonic motion time. -->
+    <param name="simulation_mode" value="false"/>
     <param name="execute" value="$(arg execute)"/>
     <param name="recovery_enabled" value="$(arg recovery_enabled)"/>
     <param name="recovery_auto_resume" value="$(arg auto_resume)"/>

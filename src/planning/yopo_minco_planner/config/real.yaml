@@ -6,7 +6,7 @@ goal_topic: /move_base_simple/goal
 trigger_topic: /traj_start_trigger
 stop_topic: /yopo_minco/stop
 camera_extrinsic_key: body_T_cam0
-plan_from_reference: false
+plan_from_reference: true
 depth_replan_rate: 10.0
 ctrl_dt: 0.02
 visualize: true
@@ -34,23 +34,26 @@ max_speed: 0.8
 max_acceleration: 1.5
 max_jerk: 10.0
 min_height: 0.6
-max_height: 1.5
-height_band: 0.3
-test_radius: 3.0
+max_height: 5
+height_band: 2
+test_radius: 5.0
 max_duration: 120.0
 check_dt: 0.02
-goal_min_distance: 0.5
-goal_max_distance: 2.0
+goal_min_distance: 1.1
+goal_max_distance: 5.0
 hover_speed: 0.15
-arrive_distance: 0.25
-arrive_speed: 0.15
-arrive_hold: 0.5
+arrive_distance: 1
+#arrive_speed: 0.15
+#arrive_hold: 0.5
+arrival_yaw_rate: 0.8
+arrival_yaw_min_distance: 0.3
 sensor_timeout: 0.3
 state_timeout: 1.5
 max_sensor_skew: 0.1
 plan_timeout: 0.25
 max_tracking_error: 0.5
 max_invalid_depth_fraction: 0.3
+simulation_mode: false
 
 # Recovery uses monotonic time; only corridor rejection is recoverable.
 # Launch auto_resume:=true is an explicit opt-in; default requires confirmation.

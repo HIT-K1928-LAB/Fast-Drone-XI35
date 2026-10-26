@@ -145,7 +145,7 @@ start_common_windows() {
         "source $YOPO_WS/devel/setup.bash; roslaunch yopo_minco_planner yopo_minco.launch execute:=false engine_file:=/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine" \
         "manual"
     create_window "minco" \
-        "source $YOPO_WS/devel/setup.bash; roslaunch yopo_minco_planner yopo_minco.launch execute:=true engine_file:=/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine auto_resume:=true" \
+        "source $YOPO_WS/devel/setup.bash; roslaunch yopo_minco_planner yopo_minco.launch execute:=true engine_file:=/root/data/yopo-minco-flight-shallow/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine auto_resume:=false" \
         "manual"
     create_window "minco_goal" \
         "source $YOPO_WS/devel/setup.bash; rosrun yopo_minco_planner minco_goal.py" \

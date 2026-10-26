@@ -8,6 +8,8 @@
   <arg name="camera_extrinsic_config" default="/root/Fast-Drone-XI35/src/realflight_modules/VINS-Fusion-gpu/config/fast_drone_250.yaml"/>
   <node pkg="yopo_minco_planner" type="yopo_minco_node" name="yopo_minco_planner" output="screen" required="true">
     <rosparam command="load" file="$(arg config_file)"/>
+    <!-- Real hardware must keep RC gating and monotonic motion time. -->
+    <param name="simulation_mode" value="false"/>
     <!-- Override after YAML load; preserve the fusion launch/config unchanged. -->
     <param name="odom_topic" value="$(arg odom_topic)"/>
     <!-- Health/timestamp monitoring only; odom still comes solely from mocap. -->

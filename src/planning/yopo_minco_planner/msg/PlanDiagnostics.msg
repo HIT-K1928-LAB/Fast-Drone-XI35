@@ -1,0 +1,20 @@
+# One planning attempt. plan_ok does not mean adopted or executed.
+std_msgs/Header header
+uint64 generation
+bool inference_ok
+bool plan_ok
+string reason
+int32 selected_action
+float64 planning_wall_ms
+float64 motion_epoch
+float64[9] head
+float64[9] rotation_wc
+geometry_msgs/Point goal
+geometry_msgs/Point origin
+float32[210] endstate
+float32[15] score
+float32[300] radius
+float64 t1
+float64 t2
+geometry_msgs/Point inner
+float64 depth_invalid_fraction

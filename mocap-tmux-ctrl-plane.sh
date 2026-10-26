@@ -19,6 +19,7 @@ done
 command -v tmux >/dev/null
 
 if tmux has-session -t "=$SESH" 2>/dev/null; then
+    tmux set-option -t "$SESH" mouse on
     exec tmux attach-session -t "=$SESH"
 fi
 
@@ -61,12 +62,13 @@ window sensors "roslaunch realsense2_camera rs_camera.launch"
 split "roslaunch mavros px4.launch"
 window px4ctrl "roslaunch px4ctrl run_ctrl_mocap_only.launch odom_topic:=$ODOM_TOPIC"
 window minco_test "roslaunch yopo_minco_planner yopo_minco_mocap_only.launch odom_topic:=$ODOM_TOPIC execute:=false engine_file:=$YOPO_ROOT/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine"
-window minco "roslaunch yopo_minco_planner yopo_minco_mocap_only.launch odom_topic:=$ODOM_TOPIC execute:=true auto_resume:=true engine_file:=$YOPO_ROOT/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine"
+window minco "roslaunch yopo_minco_planner yopo_minco_mocap_only.launch odom_topic:=$ODOM_TOPIC execute:=true auto_resume:=false engine_file:=$YOPO_ROOT/yopo_minco_sim/deployment/models/yopo_minco_fp16.engine"
 window minco_goal "rosrun yopo_minco_planner minco_goal.py"
 window takeoff_land "bash $WORKSPACE/shfiles/takeoff.sh"
 split "bash $WORKSPACE/shfiles/land.sh"
 # Existing recorder already includes mocap odom, MAVROS IMU and MINCO outputs.
 window record "bash $YOPO_ROOT/record_mocap_ground.sh"
 window lazer "rosrun dynamic_reconfigure dynparam set /camera/stereo_module emitter_enabled 1"
+tmux set-option -t "$SESH" mouse on
 tmux select-window -t "$SESH:motioncapture"
 exec tmux attach-session -t "=$SESH"
